@@ -399,3 +399,25 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+
+# ============================================
+# ChessGame.Api - Local configuration & secrets
+# ============================================
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Local-only ASP.NET configuration
+appsettings.Local.json
+appsettings.*.local.json
+
+# Local secrets
+secrets/
+Secrets/
+
+# Local databases
+*.db
+*.db-shm
+*.db-wal
