@@ -15,6 +15,52 @@ public class AuthController : ControllerBase
         _authService = authService;
     }
 
+    [HttpPost("login")]
+    public async Task<IActionResult> Login(
+        [FromBody] LoginRequest request)
+    {
+        try
+        {
+            var result =
+                await _authService.LoginAsync(request);
+
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ex.Message switch
+            {
+                "INVALID_CREDENTIALS" =>
+                    Unauthorized(new
+                    {
+                        message =
+                            "Email hoặc mật khẩu không chính xác."
+                    }),
+
+                "ACCOUNT_DISABLED" =>
+                    StatusCode(
+                        StatusCodes.Status403Forbidden,
+                        new
+                        {
+                            message =
+                                "Tài khoản đã bị vô hiệu hóa."
+                        }
+                    ),
+
+                _ =>
+                    StatusCode(
+                        StatusCodes
+                            .Status500InternalServerError,
+                        new
+                        {
+                            message =
+                                "Đã xảy ra lỗi khi đăng nhập."
+                        }
+                    )
+            };
+        }
+    }
+
     [HttpPost("register")]
     public async Task<IActionResult> Register(
         [FromBody] RegisterRequest request)
@@ -53,6 +99,15 @@ public class AuthController : ControllerBase
                         message =
                             "Username hoặc email đã tồn tại."
                     }),
+                    
+                "DEFAULT_ITEMS_NOT_CONFIGURED" =>
+                    StatusCode(
+                        StatusCodes.Status500InternalServerError,
+                    new
+                    {
+                        message =
+                            "Hệ thống chưa cấu hình skin mặc định."
+                    }),
 
                 _ =>
                     StatusCode(
@@ -66,5 +121,58 @@ public class AuthController : ControllerBase
                     )
             };
         }
+    }
+
+    [HttpPost("refresh")]
+    public async Task<IActionResult> Refresh(
+        [FromBody] RefreshRequest request)
+    {
+        try
+        {
+            var result =
+                await _authService
+                    .RefreshAsync(request);
+
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ex.Message switch
+            {
+                "INVALID_REFRESH_TOKEN" =>
+                    Unauthorized(new
+                    {
+                        message =
+                            "Refresh token không hợp lệ hoặc đã hết hạn."
+                    }),
+
+                "ACCOUNT_DISABLED" =>
+                    StatusCode(
+                        StatusCodes
+                            .Status403Forbidden,
+                        new
+                        {
+                            message =
+                                "Tài khoản đã bị vô hiệu hóa."
+                        }
+                    ),
+
+                _ =>
+                    StatusCode(
+                        StatusCodes
+                            .Status500InternalServerError
+                    )
+            };
+        }
+    }
+    
+    [HttpPost("logout")]
+    public async Task<IActionResult> Logout(
+        [FromBody] LogoutRequest request)
+    {
+        await _authService
+            .LogoutAsync(request);
+
+        return NoContent();
     }
 }
