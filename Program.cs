@@ -7,11 +7,50 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
 using MongoDB.Driver;
+using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Controllers
 builder.Services.AddControllers();
+
+// Swagger / OpenAPI configuration
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(options =>
+{
+    options.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "ChessGame.Api",
+        Version = "v1",
+        Description = "API documentation for ChessGame Backend Service"
+    });
+
+    // Cấu hình Nút Authorize (JWT Token) trên Swagger UI
+    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Name = "Authorization",
+        Type = SecuritySchemeType.Http,
+        Scheme = "Bearer",
+        BearerFormat = "JWT",
+        In = ParameterLocation.Header,
+        Description = "Nhập JWT Bearer token để xác thực API"
+    });
+
+    options.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            Array.Empty<string>()
+        }
+    });
+});
 
 // MongoDB Settings
 builder.Services.Configure<MongoDbSettings>(
@@ -73,13 +112,9 @@ builder.Services.AddSingleton<IMongoDatabase>(
 
 // Application Services
 builder.Services.AddScoped<UserService>();
-
 builder.Services.AddScoped<AuthService>();
-
 builder.Services.AddScoped<InventoryService>();
-
 builder.Services.AddScoped<JwtService>();
-
 builder.Services.AddScoped<RefreshTokenService>();
 
 // ASP.NET Core built-in password hasher
@@ -139,6 +174,17 @@ builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
+// Enable Swagger UI in Development mode
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI(options =>
+    {
+        options.SwaggerEndpoint("/swagger/v1/swagger.json", "ChessGame API v1");
+        options.RoutePrefix = "swagger";
+    });
+}
+
 // Tạo MongoDB indexes
 using (var scope = app.Services.CreateScope())
 {
@@ -155,9 +201,7 @@ using (var scope = app.Services.CreateScope())
             .GetRequiredService<RefreshTokenService>();
 
     await userService.EnsureIndexesAsync();
-
     await inventoryService.EnsureIndexesAsync();
-
     await refreshTokenService.EnsureIndexesAsync();
 }
 
