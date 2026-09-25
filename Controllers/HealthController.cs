@@ -15,7 +15,6 @@ public class HealthController : ControllerBase
         _database = database;
     }
 
-    // Check riêng Backend
     // GET /api/health
     [HttpGet]
     public IActionResult CheckHealth()
@@ -32,23 +31,26 @@ public class HealthController : ControllerBase
         });
     }
 
-    // Check Backend + MongoDB
+    // HEAD /api/health
+    [HttpHead]
+    public IActionResult CheckHealthHead()
+    {
+        return Ok();
+    }
+
     // GET /api/health/database
     [HttpGet("database")]
     public async Task<IActionResult> CheckDatabase()
     {
         try
         {
-            // Ping MongoDB
             await _database.RunCommandAsync<BsonDocument>(
                 new BsonDocument("ping", 1)
             );
 
-            // Lấy collection items
             var items =
                 _database.GetCollection<BsonDocument>("items");
 
-            // Đếm số item
             long itemCount =
                 await items.CountDocumentsAsync(
                     FilterDefinition<BsonDocument>.Empty
