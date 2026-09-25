@@ -174,16 +174,13 @@ builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
-// Enable Swagger UI in Development mode
-if (app.Environment.IsDevelopment())
+// Enable Swagger UI (Enabled in all environments including Production/Render)
+app.UseSwagger();
+app.UseSwaggerUI(options =>
 {
-    app.UseSwagger();
-    app.UseSwaggerUI(options =>
-    {
-        options.SwaggerEndpoint("/swagger/v1/swagger.json", "ChessGame API v1");
-        options.RoutePrefix = "swagger";
-    });
-}
+    options.SwaggerEndpoint("/swagger/v1/swagger.json", "ChessGame API v1");
+    options.RoutePrefix = "swagger";
+});
 
 // Tạo MongoDB indexes
 using (var scope = app.Services.CreateScope())
