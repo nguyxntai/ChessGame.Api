@@ -15,6 +15,25 @@ public class HealthController : ControllerBase
         _database = database;
     }
 
+    // Check riêng Backend
+    // GET /api/health
+    [HttpGet]
+    public IActionResult CheckHealth()
+    {
+        return Ok(new
+        {
+            status = "ok",
+            service = "ChessGame.Api",
+            environment =
+                Environment.GetEnvironmentVariable(
+                    "ASPNETCORE_ENVIRONMENT"
+                ) ?? "Unknown",
+            checkedAt = DateTime.UtcNow
+        });
+    }
+
+    // Check Backend + MongoDB
+    // GET /api/health/database
     [HttpGet("database")]
     public async Task<IActionResult> CheckDatabase()
     {
