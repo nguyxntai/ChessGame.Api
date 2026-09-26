@@ -114,6 +114,7 @@ builder.Services.AddSingleton<IMongoDatabase>(
 builder.Services.AddScoped<UserService>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<InventoryService>();
+builder.Services.AddScoped<GachaService>();
 builder.Services.AddScoped<JwtService>();
 builder.Services.AddScoped<RefreshTokenService>();
 
@@ -200,6 +201,7 @@ using (var scope = app.Services.CreateScope())
     await userService.EnsureIndexesAsync();
     await inventoryService.EnsureIndexesAsync();
     await refreshTokenService.EnsureIndexesAsync();
+    await scope.ServiceProvider.GetRequiredService<GachaService>().EnsureIndexesAsync();
 }
 
 app.UseHttpsRedirection();
