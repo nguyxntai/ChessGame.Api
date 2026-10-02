@@ -1,6 +1,8 @@
 using ChessGame.Api.Models;
 using MongoDB.Driver;
 using MongoDB.Bson;
+using ChessGame.Api.DTOs.User;
+using System.ComponentModel.DataAnnotations;
 
 namespace ChessGame.Api.Services;
 
@@ -34,6 +36,28 @@ public class UserService
         return await _users
             .Find(user => user.Id == id)
             .FirstOrDefaultAsync();
+    }
+
+    public async Task<User?> UpdateProfileAsync(ObjectId id, UpdateProfileRequest request)
+    {
+        Validator.ValidateObject(request, new ValidationContext(request), validateAllProperties: true);
+
+        var updates = new List<UpdateDefinition<User>>
+        {
+            Builders<User>.Update.Set(user => user.UpdatedAt, DateTime.UtcNow)
+        };
+
+        if (request.HasDisplayName)
+            updates.Add(Builders<User>.Update.Set(user => user.Profile.DisplayName, request.DisplayName!.Trim()));
+
+        if (request.HasAvatarId)
+            updates.Add(Builders<User>.Update.Set(user => user.Profile.AvatarId, request.AvatarId));
+
+        // Update only supplied profile fields; never replace the user, wallet or stats.
+        return await _users.FindOneAndUpdateAsync(
+            user => user.Id == id && user.IsActive,
+            Builders<User>.Update.Combine(updates),
+            new FindOneAndUpdateOptions<User> { ReturnDocument = ReturnDocument.After });
     }
     public async Task<bool> UsernameExistsAsync(
         string normalizedUsername)
