@@ -1,6 +1,20 @@
 @ChessGame.Api_HostAddress = http://localhost:5056
 
-GET {{ChessGame.Api_HostAddress}}/weatherforecast/
+@AccessToken = replace-with-access-token
+
+GET {{ChessGame.Api_HostAddress}}/api/users/me
+Authorization: Bearer {{AccessToken}}
 Accept: application/json
+
+###
+
+PATCH {{ChessGame.Api_HostAddress}}/api/users/me/profile
+Authorization: Bearer {{AccessToken}}
+Content-Type: application/json
+
+{
+  "displayName": "TaiChess",
+  "avatarId": "avatar_01"
+}
 
 ###

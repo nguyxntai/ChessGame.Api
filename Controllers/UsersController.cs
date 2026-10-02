@@ -19,37 +19,14 @@ public class UsersController : ControllerBase
         _userService = userService;
     }
 
+    /// <summary>Read the authenticated player's profile and server-owned balances/statistics.</summary>
     [Authorize]
     [HttpGet("me")]
     public async Task<IActionResult> GetMe()
     {
-        // Tùy JWT claim mapping của ASP.NET Core,
-        // "sub" có thể tồn tại dưới một trong hai tên này.
-        string? userId =
-            User.FindFirstValue(
-                JwtRegisteredClaimNames.Sub
-            )
-            ??
-            User.FindFirstValue(
-                ClaimTypes.NameIdentifier
-            );
-
-        if (string.IsNullOrWhiteSpace(userId))
+        if (!TryGetUserId(out var objectId, out var errorResult))
         {
-            return Unauthorized(new
-            {
-                message = "Token không chứa User ID."
-            });
-        }
-
-        if (!ObjectId.TryParse(
-                userId,
-                out var objectId))
-        {
-            return Unauthorized(new
-            {
-                message = "User ID trong token không hợp lệ."
-            });
+            return errorResult;
         }
 
         var user =
@@ -76,7 +53,68 @@ public class UsersController : ControllerBase
             );
         }
 
-        var response =
+        return Ok(CreateResponse(user));
+    }
+
+    /// <summary>Update only the authenticated player's display name and/or avatar.</summary>
+    [Authorize]
+    [HttpPatch("me/profile")]
+    public async Task<IActionResult> UpdateProfile([FromBody] UpdateProfileRequest request)
+    {
+        if (!TryGetUserId(out var objectId, out var errorResult))
+        {
+            return errorResult;
+        }
+
+        var user = await _userService.GetByIdAsync(objectId);
+        if (user is null)
+        {
+            return NotFound(new { message = "Không tìm thấy người chơi." });
+        }
+
+        if (!user.IsActive)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                new { message = "Tài khoản đã bị vô hiệu hóa." });
+        }
+
+        var updatedUser = await _userService.UpdateProfileAsync(objectId, request);
+        if (updatedUser is null)
+        {
+            // The account may have been removed or disabled after the initial read.
+            user = await _userService.GetByIdAsync(objectId);
+            return user is null
+                ? NotFound(new { message = "Không tìm thấy người chơi." })
+                : StatusCode(StatusCodes.Status403Forbidden,
+                    new { message = "Tài khoản đã bị vô hiệu hóa." });
+        }
+
+        return Ok(CreateResponse(updatedUser));
+    }
+
+    private bool TryGetUserId(out ObjectId userId, out IActionResult errorResult)
+    {
+        userId = ObjectId.Empty;
+        errorResult = Unauthorized();
+        string? claim = User.FindFirstValue(JwtRegisteredClaimNames.Sub)
+            ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        if (string.IsNullOrWhiteSpace(claim))
+        {
+            errorResult = Unauthorized(new { message = "Token không chứa User ID." });
+            return false;
+        }
+
+        if (!ObjectId.TryParse(claim, out userId))
+        {
+            errorResult = Unauthorized(new { message = "User ID trong token không hợp lệ." });
+            return false;
+        }
+
+        return true;
+    }
+
+    private static UserMeResponse CreateResponse(ChessGame.Api.Models.User user) =>
             new UserMeResponse
             {
                 UserId =
@@ -146,6 +184,4 @@ public class UsersController : ControllerBase
                     user.CreatedAt
             };
 
-        return Ok(response);
-    }
 }
