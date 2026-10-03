@@ -51,12 +51,31 @@ reconnect hay tính đúng của từng buff trong môi trường chạy thật.
 
 - Dùng cấu hình MongoDB/JWT hiện có. MongoDB phải là **replica set hoặc sharded cluster**
   có transaction; không hỗ trợ standalone MongoDB cho online.
-- Chạy một instance API xử lý online. Lease `online_leases/runtime` từ chối instance thứ hai.
+- Chạy một instance API xử lý online. Lease `online_leases/runtime` chỉ cho một instance sở hữu online;
+  instance mới vẫn mở HTTP và chờ lease ở background, không làm startup crash.
   Cần backplane SignalR và thiết kế phân phối presence/ownership trước khi mở rộng nhiều instance.
 - Startup tạo các index `online_*` và index ledger thưởng; không thay đổi schema các collection cũ.
 - Worker giữ lease 15 giây và renew mỗi 3 giây. Khi mất lease, instance dừng để bảo toàn quyền xử lý.
+- Sau khi lấy lease, worker renew trong lúc recovery; chỉ mở API online khi recovery hoàn tất.
+  Trong lúc chờ/recovery, API online trả `503 OnlineTemporarilyUnavailable`; SignalR cần kết nối lại.
 - Các mutation dùng transaction snapshot + majority write, ghi guard chung trước khi đọc/đổi trạng thái.
   Đây là cách ưu tiên tính nhất quán cho một instance; chưa tối ưu throughput cho nhiều trận đồng thời.
+
+### Deploy trên Render
+
+- Trong Settings của web service, đặt **Health Check Path** là `/api/health`. Endpoint này kiểm tra
+  HTTP đang chạy, không phụ thuộc quyền sở hữu online, để Render chuyển traffic và tắt container cũ.
+  Không dùng endpoint gameplay làm health check vì instance mới phải chờ instance cũ nhả lease.
+- Giữ một instance, chưa bật autoscaling. Render vẫn có thể chạy container cũ/mới đồng thời trong deploy.
+  Xem [quy trình zero-downtime deploy](https://render.com/docs/deploys#zero-downtime-deploys):
+  Render chuyển traffic trước, đợi 60 giây rồi gửi SIGTERM cho container cũ.
+- Trong khoảng chuyển giao này, HTTP/auth vẫn phục vụ nhưng online có thể tạm trả 503 khoảng một phút,
+  cộng thời gian shutdown, chờ lease hết hạn nếu không nhả được, và recovery. Đồng hồ trận vẫn chạy.
+  Đây chưa phải chuyển giao gameplay không gián đoạn; client cần retry/reconnect và tải lại snapshot.
+- Log `Another instance owns online gameplay. HTTP is available; waiting...` là trạng thái chờ bình thường.
+  Log `Online runtime ready; lease acquired and match recovery completed.` cho biết online đã sẵn sàng.
+- Nếu chờ mãi sau deploy, kiểm tra API local hoặc service khác có dùng chung database production hay không.
+  Tắt instance đó hoặc dùng database riêng cho development; không xóa lease khi instance đó còn chạy.
 
 Các khóa cấu hình tùy chọn dưới section `Online` (hoặc biến môi trường `Online__...`):
 

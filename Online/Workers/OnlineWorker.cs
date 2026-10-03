@@ -6,38 +6,79 @@ namespace ChessGame.Api.Online;
 public sealed class OnlineWorker(OnlineStore store, OnlineService service, OnlineRuntimeLease lease,
     LiveConnections live, IHubContext<GameHub> hub, IHostApplicationLifetime lifetime, ILogger<OnlineWorker> logger) : BackgroundService
 {
-    public override async Task StartAsync(CancellationToken ct)
-    {
-        if (!await lease.Acquire(ct)) throw new InvalidOperationException("Another API instance owns online gameplay. Run one online instance until a SignalR backplane is configured.");
-        using var renewDuringRecovery = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var heartbeat = Heartbeat(renewDuringRecovery.Token);
-        try { await service.Recover(ct); }
-        finally { renewDuringRecovery.Cancel(); await heartbeat; }
-        await base.StartAsync(ct);
-    }
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var heartbeat = Heartbeat(stoppingToken);
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
-        while (!stoppingToken.IsCancellationRequested)
+        // Render starts the replacement before stopping the previous container.
+        // Let HTTP start while we wait; online endpoints remain fenced during takeover/recovery.
+        await Task.Yield();
+        using var runtime = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        var ct = runtime.Token;
+        Task heartbeat = Task.CompletedTask;
+        try
         {
+            await WaitForLease(ct);
+            heartbeat = Heartbeat(runtime);
+            await service.Recover(ct);
+            ct.ThrowIfCancellationRequested();
+            lease.MarkReady();
+            logger.LogInformation("Online runtime ready; lease acquired and match recovery completed.");
+
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    lease.RequireOwner();
+                    await service.Sweep(live, ct);
+                    await Publish(ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
+                catch (OnlineException) when (!lease.HasLease)
+                {
+                    logger.LogCritical("Online runtime lease was lost; stopping to preserve authority.");
+                    lifetime.StopApplication();
+                    break;
+                }
+                catch (Exception ex) { logger.LogError(ex, "Online worker iteration failed; persisted state and outbox will be retried."); }
+                if (!await timer.WaitForNextTickAsync(ct)) break;
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            logger.LogCritical(ex, "Online runtime initialization failed; stopping before accepting online commands.");
+            lifetime.StopApplication();
+        }
+        finally
+        {
+            lease.MarkUnavailable();
+            runtime.Cancel();
+            await heartbeat;
+        }
+    }
+    private async Task WaitForLease(CancellationToken ct)
+    {
+        bool waitingLogged = false;
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
             try
             {
-                lease.RequireOwner();
-                await service.Sweep(live, stoppingToken);
-                await Publish(stoppingToken);
+                if (await lease.Acquire(ct)) return;
+                if (!waitingLogged)
+                {
+                    logger.LogInformation("Another instance owns online gameplay. HTTP is available; waiting for its lease to be released or expire.");
+                    waitingLogged = true;
+                }
             }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
-            catch (OnlineException ex) when (ex.Code == "OnlineLeaseLost")
-            { logger.LogCritical("Online runtime lease was lost; stopping to preserve authority."); lifetime.StopApplication(); break; }
-            catch (Exception ex) { logger.LogError(ex, "Online worker iteration failed; persisted state and outbox will be retried."); }
-            try { if (!await timer.WaitForNextTickAsync(stoppingToken)) break; }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex) { logger.LogError(ex, "Online lease acquisition failed; retrying in 3 seconds."); }
+            await Task.Delay(TimeSpan.FromSeconds(3), ct);
         }
-        await heartbeat;
     }
-    private async Task Heartbeat(CancellationToken ct)
+    private async Task Heartbeat(CancellationTokenSource runtime)
     {
+        var ct = runtime.Token;
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
         try
         {
@@ -48,8 +89,13 @@ public sealed class OnlineWorker(OnlineStore store, OnlineService service, Onlin
                 catch (Exception ex)
                 {
                     logger.LogError(ex, "Online lease renewal failed.");
-                    try { lease.RequireOwner(); }
-                    catch (OnlineException) { lifetime.StopApplication(); break; }
+                    if (!lease.HasLease)
+                    {
+                        lease.MarkUnavailable();
+                        runtime.Cancel();
+                        lifetime.StopApplication();
+                        break;
+                    }
                 }
             }
         }
@@ -72,5 +118,9 @@ public sealed class OnlineWorker(OnlineStore store, OnlineService service, Onlin
         }
     }
     public override async Task StopAsync(CancellationToken ct)
-    { await base.StopAsync(ct); await lease.Release(ct); }
+    {
+        lease.MarkUnavailable();
+        await base.StopAsync(ct);
+        await lease.Release(ct);
+    }
 }
