@@ -8,11 +8,33 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
 using MongoDB.Driver;
 using Microsoft.OpenApi.Models;
+using ChessGame.Api.Online;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Controllers
 builder.Services.AddControllers();
+builder.Services.AddSignalR(options =>
+{
+    options.MaximumReceiveMessageSize = 32 * 1024;
+    options.ClientTimeoutInterval = TimeSpan.FromSeconds(30);
+    options.KeepAliveInterval = TimeSpan.FromSeconds(10);
+});
+builder.Services.AddOptions<OnlineOptions>()
+    .Bind(builder.Configuration.GetSection("Online"))
+    .Validate(o => o.ProtocolVersion > 0 && o.QueueSeconds > 0 && o.ReadySeconds > 0 &&
+        o.ReconnectSeconds > 0 && o.DrawOfferSeconds > 0 && o.RoomSeconds > 0 &&
+        o.InitialRatingRange >= 0 && o.RatingRangePerSecond >= 0 && o.EloK is > 0 and <= 128,
+        "Online deadlines, protocol and rating configuration are invalid.")
+    .ValidateOnStart();
+builder.Services.AddSingleton<OnlineRuntimeLease>();
+builder.Services.AddSingleton<OnlineStore>();
+builder.Services.AddSingleton<AramEngine>();
+builder.Services.AddSingleton<GameRules>();
+builder.Services.AddSingleton<OnlineService>();
+builder.Services.AddSingleton<LiveConnections>();
+builder.Services.AddScoped<OnlineExceptionFilter>();
+builder.Services.AddHostedService<OnlineWorker>();
 
 // Swagger / OpenAPI configuration
 builder.Services.AddEndpointsApiExplorer();
@@ -145,6 +167,17 @@ builder.Services
     )
     .AddJwtBearer(options =>
     {
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                // Browser WebSockets cannot set a bearer header. Restrict query-token auth to this hub.
+                if (context.Request.Path.StartsWithSegments("/hubs/game") &&
+                    context.Request.Query.TryGetValue("access_token", out var token))
+                    context.Token = token.ToString();
+                return Task.CompletedTask;
+            }
+        };
         options.TokenValidationParameters =
             new TokenValidationParameters
             {
@@ -202,6 +235,7 @@ using (var scope = app.Services.CreateScope())
     await inventoryService.EnsureIndexesAsync();
     await refreshTokenService.EnsureIndexesAsync();
     await scope.ServiceProvider.GetRequiredService<GachaService>().EnsureIndexesAsync();
+    await scope.ServiceProvider.GetRequiredService<OnlineStore>().EnsureIndexesAsync();
 }
 
 app.UseHttpsRedirection();
@@ -210,5 +244,6 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapHub<GameHub>("/hubs/game", options => options.CloseOnAuthenticationExpiration = true);
 
 app.Run();
