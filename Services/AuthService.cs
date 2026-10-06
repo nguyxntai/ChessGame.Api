@@ -179,7 +179,7 @@ public class AuthService
             Diamonds = user.Wallet.Diamonds,
             Tickets = user.Wallet.Tickets,
 
-            Elo = user.Stats.Elo,
+            Elo = ChessGame.Api.Services.Ratings.RatingPolicies.Display(user.Ratings.Classic.Rating),
 
             CreatedAt = user.CreatedAt
         };

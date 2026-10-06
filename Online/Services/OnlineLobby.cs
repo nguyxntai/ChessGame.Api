@@ -26,11 +26,13 @@ public sealed partial class OnlineService
             if (current is not null) await ExpireTicket(s, current, now, token);
             await AvailableAsync(s, userId, token);
             var ticket = new OnlineTicket { UserId = userId, RequestId = request.RequestId, Settings = settings,
-                Rating = user.Stats.Elo, CreatedAt = now, ExpiresAt = now.AddSeconds(config.QueueSeconds) };
+                PoolKey = MatchmakingPolicy.PoolKey(settings), Provisional = user.Ratings.For(settings.Mode).Provisional,
+                Rating = ChessGame.Api.Services.Ratings.RatingPolicies.Display(user.Ratings.For(settings.Mode).Rating), CreatedAt = now, ExpiresAt = now.AddSeconds(config.QueueSeconds) };
             await store.Seats.InsertOneAsync(s, new OnlineSeat { UserId = userId, Kind = "Ticket", ReferenceId = ticket.Id }, cancellationToken: token);
             await store.Tickets.InsertOneAsync(s, ticket, cancellationToken: token);
             await Emit(s, "QueueStatusChanged", Ticket(ticket), new() { userId }, token);
-            await Pair(s, now, token);
+            await RegisterPool(s, ticket.PoolKey, token);
+            await Pair(s, now, token, ticket.PoolKey);
             ticket = await store.Tickets.Find(s, x => x.Id == ticket.Id).FirstOrDefaultAsync(token);
             return Ticket(ticket!);
         }, ct);
@@ -75,38 +77,108 @@ public sealed partial class OnlineService
         await store.Seats.DeleteOneAsync(s, x => x.UserId == t.UserId && x.ReferenceId == t.Id && x.Kind == "Ticket", cancellationToken: ct);
         await Emit(s, "QueueStatusChanged", Ticket(t), new() { t.UserId }, ct);
     }
-    private int RatingRange(OnlineTicket t, DateTime now) => config.InitialRatingRange +
-        (int)Math.Min(3000, Math.Max(0, (now - t.CreatedAt).TotalSeconds) * config.RatingRangePerSecond);
-    private async Task Pair(IClientSessionHandle s, DateTime now, CancellationToken ct)
+    private Task RegisterPool(IClientSessionHandle s, string key, CancellationToken ct) =>
+        store.Pools.UpdateOneAsync(s, x => x.Id == key,
+            Builders<QueuePool>.Update.SetOnInsert(x => x.LastServedAt, DateTime.UnixEpoch)
+                .SetOnInsert(x => x.CursorAt, DateTime.UnixEpoch).SetOnInsert(x => x.CursorId, ""), new UpdateOptions { IsUpsert = true }, ct);
+
+    private async Task Pair(IClientSessionHandle s, DateTime now, CancellationToken ct, string? focusPool = null)
     {
-        var tickets = await store.Tickets.Find(s, x => x.Status == "Queued").SortBy(x => x.CreatedAt).Limit(200).ToListAsync(ct);
-        foreach (var t in tickets)
+        // Bounded migration also handles queued tickets written by the previous server version.
+        var legacy = await store.Tickets.Find(s, Builders<OnlineTicket>.Filter.Eq(x => x.Status, "Queued") &
+            (Builders<OnlineTicket>.Filter.Eq(x => x.PoolKey, "") | Builders<OnlineTicket>.Filter.Eq(x => x.PoolKey, null))).Limit(200).ToListAsync(ct);
+        foreach (var ticket in legacy)
         {
-            await ExpireTicket(s, t, now, ct);
-            if (t.Status != "Queued") continue;
-            try { await Loadout(s, await UserAsync(s, t.UserId, ct), ct); }
-            catch (OnlineException ex) when (ex.Code is "InvalidLoadout" or "Forbidden")
-            {
-                t.Status = "Cancelled";
-                await store.Tickets.ReplaceOneAsync(s, x => x.Id == t.Id, t, cancellationToken: ct);
-                await store.Seats.DeleteOneAsync(s, x => x.UserId == t.UserId && x.ReferenceId == t.Id, cancellationToken: ct);
-                await Emit(s, "QueueStatusChanged", new { ticket = Ticket(t), reason = ex.Code }, new() { t.UserId }, ct);
-            }
+            ticket.PoolKey = MatchmakingPolicy.PoolKey(ticket.Settings);
+            await store.Tickets.UpdateOneAsync(s, x => x.Id == ticket.Id, Builders<OnlineTicket>.Update.Set(x => x.PoolKey, ticket.PoolKey), cancellationToken: ct);
+            await RegisterPool(s, ticket.PoolKey, ct);
         }
-        var remaining = tickets.Where(t => t.Status == "Queued").ToList();
-        foreach (var a in remaining.ToList())
+        var expired = await store.Tickets.Find(s, x => x.Status == "Queued" && x.ExpiresAt <= now).Limit(200).ToListAsync(ct);
+        foreach (var ticket in expired) await ExpireTicket(s, ticket, now, ct);
+        var poolFilter = focusPool is null ? Builders<QueuePool>.Filter.Empty : Builders<QueuePool>.Filter.Eq(x => x.Id, focusPool);
+        var pools = await store.Pools.Find(s, poolFilter).SortBy(x => x.LastServedAt).ThenBy(x => x.Id).Limit(config.PoolsPerSweep).ToListAsync(ct);
+        int formed = 0;
+        foreach (var pool in pools)
         {
-            if (a.Status != "Queued") continue;
-            var b = remaining.Where(b => b.Id != a.Id && b.UserId != a.UserId && b.Status == "Queued" && b.Settings == a.Settings &&
-                Math.Abs((long)b.Rating - a.Rating) <= Math.Min(RatingRange(a, now), RatingRange(b, now)))
-                .OrderBy(b => Math.Abs((long)b.Rating - a.Rating)).ThenBy(b => b.CreatedAt).FirstOrDefault();
-            if (b is null) continue;
-            var m = await CreateMatch(s, new() { a.UserId, b.UserId }, a.Settings, true, now, ct);
-            foreach (var t in new[] { a, b })
+            var filter = Builders<OnlineTicket>.Filter.Eq(x => x.Status, "Queued") & Builders<OnlineTicket>.Filter.Eq(x => x.PoolKey, pool.Id) & Builders<OnlineTicket>.Filter.Gt(x => x.ExpiresAt, now);
+            var oldest = await store.Tickets.Find(s, filter).SortBy(x => x.CreatedAt).ThenBy(x => x.Id).Limit(config.CandidatesPerPool / 2).ToListAsync(ct);
+            if (oldest.Count == 0) { await store.Pools.DeleteOneAsync(s, x => x.Id == pool.Id, cancellationToken: ct); continue; }
+            var cursor = Builders<OnlineTicket>.Filter.Gt(x => x.CreatedAt, pool.CursorAt) |
+                (Builders<OnlineTicket>.Filter.Eq(x => x.CreatedAt, pool.CursorAt) & Builders<OnlineTicket>.Filter.Gt(x => x.Id, pool.CursorId));
+            var rotating = await store.Tickets.Find(s, filter & cursor).SortBy(x => x.CreatedAt).ThenBy(x => x.Id).Limit(config.CandidatesPerPool / 2).ToListAsync(ct);
+            if (rotating.Count == 0) rotating = oldest;
+            var end = rotating[^1];
+            await store.Pools.UpdateOneAsync(s, x => x.Id == pool.Id, Builders<QueuePool>.Update.Set(x => x.LastServedAt, now)
+                .Set(x => x.CursorAt, end.CreatedAt).Set(x => x.CursorId, end.Id), cancellationToken: ct);
+            var candidates = oldest.Concat(rotating).DistinctBy(x => x.Id).OrderBy(x => x.CreatedAt).ThenBy(x => x.Id).ToList();
+            var ids = candidates.Select(x => ObjectId.Parse(x.UserId)).ToList();
+            var users = (await store.Users.Find(s, Builders<ChessGame.Api.Models.User>.Filter.In(x => x.Id, ids)).ToListAsync(ct)).ToDictionary(x => x.Id.ToString());
+            var itemIds = users.Values.SelectMany(u => new[] { u.Equipped.ChessSkinId, u.Equipped.BoardSkinId }).Where(x => x.HasValue).Select(x => x!.Value).Distinct().ToList();
+            var items = itemIds.Count == 0 ? new Dictionary<ObjectId, ChessGame.Api.Models.Item>() : (await store.Items.Find(s, Builders<ChessGame.Api.Models.Item>.Filter.In(x => x.Id, itemIds)).ToListAsync(ct)).ToDictionary(x => x.Id);
+            var owned = itemIds.Count == 0 ? new HashSet<(ObjectId, ObjectId)>() : (await store.PlayerItems.Find(s, Builders<ChessGame.Api.Models.PlayerItem>.Filter.In(x => x.UserId, ids) &
+                Builders<ChessGame.Api.Models.PlayerItem>.Filter.In(x => x.ItemId, itemIds)).ToListAsync(ct)).Select(x => (x.UserId, x.ItemId)).ToHashSet();
+            var network = await store.Connections.Find(s, Builders<OnlineConnection>.Filter.In(x => x.UserId, candidates.Select(x => x.UserId)) &
+                Builders<OnlineConnection>.Filter.Gt(x => x.ExpiresAt, now) & Builders<OnlineConnection>.Filter.Gte(x => x.LatencyMeasuredAt, now.AddSeconds(-60)) &
+                Builders<OnlineConnection>.Filter.Gte(x => x.LatencySamples, 3)).ToListAsync(ct);
+            var refresh = new List<WriteModel<OnlineTicket>>();
+            foreach (var t in candidates)
             {
-                t.Status = "Matched"; t.MatchId = m.Id;
-                await store.Tickets.ReplaceOneAsync(s, x => x.Id == t.Id, t, cancellationToken: ct);
-                await Emit(s, "QueueStatusChanged", Ticket(t), new() { t.UserId }, ct);
+                var previousRating = t.Rating; var previousPlacement = t.Provisional; var previousLatency = t.RoundTripMilliseconds;
+                bool valid = users.TryGetValue(t.UserId, out var u) && u.IsActive;
+                if (valid)
+                    foreach (var entry in new[] { (Id: u!.Equipped.ChessSkinId, Type: "CHESS"), (Id: u!.Equipped.BoardSkinId, Type: "BOARD") })
+                        if (entry.Id is { } itemId && (!items.TryGetValue(itemId, out var item) || !item.IsActive ||
+                            !item.Type.Contains(entry.Type, StringComparison.OrdinalIgnoreCase) || !owned.Contains((u.Id, itemId)))) valid = false;
+                if (!valid)
+                {
+                    t.Status = "Cancelled";
+                    await store.Tickets.ReplaceOneAsync(s, x => x.Id == t.Id, t, cancellationToken: ct);
+                    await store.Seats.DeleteOneAsync(s, x => x.UserId == t.UserId && x.ReferenceId == t.Id, cancellationToken: ct);
+                    await Emit(s, "QueueStatusChanged", new { ticket = Ticket(t), reason = "UnavailableParticipant" }, new() { t.UserId }, ct);
+                    continue;
+                }
+                t.Rating = ChessGame.Api.Services.Ratings.RatingPolicies.Display(u!.Ratings.For(t.Settings.Mode).Rating);
+                t.Provisional = u.Ratings.For(t.Settings.Mode).Provisional;
+                var samples = network.Where(x => x.UserId == t.UserId && x.RoundTripMilliseconds is not null).OrderBy(x => x.RoundTripMilliseconds).ToList();
+                t.RoundTripMilliseconds = samples.Count == 0 ? null : samples[samples.Count / 2].RoundTripMilliseconds;
+                if (t.Rating != previousRating || t.Provisional != previousPlacement || t.RoundTripMilliseconds != previousLatency)
+                    refresh.Add(new UpdateOneModel<OnlineTicket>(Builders<OnlineTicket>.Filter.Eq(x => x.Id, t.Id) & Builders<OnlineTicket>.Filter.Eq(x => x.Status, "Queued"),
+                        Builders<OnlineTicket>.Update.Set(x => x.Rating, t.Rating).Set(x => x.Provisional, t.Provisional).Set(x => x.RoundTripMilliseconds, t.RoundTripMilliseconds)));
+            }
+            if (refresh.Count > 0) await store.Tickets.BulkWriteAsync(s, refresh, cancellationToken: ct);
+            candidates.RemoveAll(x => x.Status != "Queued");
+            var keys = new List<string>();
+            for (int i = 0; i < candidates.Count; i++) for (int j = i + 1; j < candidates.Count; j++)
+                if (MatchmakingPolicy.Cost(candidates[i], candidates[j], now, config, 0, null) is not null)
+                    keys.Add(MatchmakingPolicy.PairKey(candidates[i].UserId, candidates[j].UserId));
+            var recent = await store.Matches.Aggregate(s).Match(new BsonDocument {
+                { "SettlementPairKey", new BsonDocument("$in", new BsonArray(keys)) }, { "Result.RatingApplied", true },
+                { "FinishedAt", new BsonDocument("$gte", now.AddHours(-24)) } })
+                .Group<BsonDocument>(new BsonDocument { { "_id", "$SettlementPairKey" }, { "count", new BsonDocument("$sum", 1) }, { "last", new BsonDocument("$max", "$FinishedAt") } }).ToListAsync(ct);
+            var pairs = recent.ToDictionary(x => x["_id"].AsString);
+            var planned = PairingPlanner.Match(candidates.Count, (i, j) => {
+                var a = candidates[i]; var b = candidates[j];
+                pairs.TryGetValue(MatchmakingPolicy.PairKey(a.UserId, b.UserId), out var previous);
+                return MatchmakingPolicy.Cost(a, b, now, config, previous?["count"].AsInt32 ?? 0, previous?["last"].ToUniversalTime());
+            });
+            foreach (var (i, j) in planned)
+            {
+                var a = candidates[i]; var b = candidates[j];
+                var quality = new MatchmakingDiagnostics { RatingGap = Math.Abs(a.Rating - b.Rating),
+                    MaximumWaitSeconds = Math.Max((now - a.CreatedAt).TotalSeconds, (now - b.CreatedAt).TotalSeconds),
+                    BothProvisional = a.Provisional && b.Provisional, MixedPlacement = a.Provisional != b.Provisional };
+                var m = await CreateMatch(s, new() { a.UserId, b.UserId }, a.Settings, true, now, ct, quality);
+                quality.WhiteRoundTripMilliseconds = m.Players[0].UserId == a.UserId ? a.RoundTripMilliseconds : b.RoundTripMilliseconds;
+                quality.BlackRoundTripMilliseconds = m.Players[1].UserId == a.UserId ? a.RoundTripMilliseconds : b.RoundTripMilliseconds;
+                await Save(s, m, ct);
+                foreach (var t in new[] { a, b })
+                {
+                    t.Status = "Matched"; t.MatchId = m.Id;
+                    await store.Tickets.ReplaceOneAsync(s, x => x.Id == t.Id, t, cancellationToken: ct);
+                    await Emit(s, "QueueStatusChanged", Ticket(t), new() { t.UserId }, ct);
+                }
+                // Bound Mongo writes as well as graph size within the shared transaction.
+                if (++formed >= config.MaximumPairsPerSweep) return;
             }
         }
     }

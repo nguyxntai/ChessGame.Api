@@ -8,7 +8,13 @@ public sealed class OnlineOptions
     public int ReconnectSeconds { get; set; } = 60;
     public int DrawOfferSeconds { get; set; } = 30;
     public int RoomSeconds { get; set; } = 1800;
-    public int InitialRatingRange { get; set; } = 150;
-    public int RatingRangePerSecond { get; set; } = 10;
-    public int EloK { get; set; } = 32;
+    public int InitialRatingRange { get; set; } = 100;
+    public int RatingRangePerSecond { get; set; } = 2;
+    public int MaximumRatingRange { get; set; } = 300;
+    public int MaximumPairsPerSweep { get; set; } = 16;
+    public int PoolsPerSweep { get; set; } = 8;
+    public int CandidatesPerPool { get; set; } = 128;
+    public int RecentOpponentSeconds { get; set; } = 600;
+    public int RecentOpponentRelaxSeconds { get; set; } = 60;
+    public int MaximumLatencyDifferenceMilliseconds { get; set; } = 150;
 }
