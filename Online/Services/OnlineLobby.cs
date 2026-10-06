@@ -1,4 +1,8 @@
 using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using MongoDB.Bson;
 using MongoDB.Driver;
 
 namespace ChessGame.Api.Online;
@@ -110,13 +114,15 @@ public sealed partial class OnlineService
     public async Task<RoomSnapshot> CreateRoom(string userId, CreateRoomRequest request, CancellationToken ct)
     {
         lease.RequireOwner(); RequestId(request.RequestId); var settings = ValidateSettings(request.Settings);
+        var fingerprint = RoomCreationFingerprint(settings);
         return await store.Transaction(async (s, token) =>
         {
             await UserAsync(s, userId, token);
             var previous = await store.Rooms.Find(s, r => r.CreatorId == userId && r.RequestId == request.RequestId).FirstOrDefaultAsync(token);
             if (previous is not null)
             {
-                if (previous.Settings != settings) throw new OnlineException("RequestIdConflict");
+                await EnsureRoomCreationFingerprint(s, previous, token);
+                if (previous.CreationFingerprint != fingerprint) throw new OnlineException("RequestIdConflict");
                 return Room(previous);
             }
             await AvailableAsync(s, userId, token);
@@ -124,11 +130,33 @@ public sealed partial class OnlineService
             do { code = Convert.ToHexString(RandomNumberGenerator.GetBytes(4)); }
             while (await store.Rooms.Find(s, r => r.Code == code).AnyAsync(token));
             var room = new OnlineRoom { OwnerId = userId, CreatorId = userId, RequestId = request.RequestId, Code = code, Members = new() { userId },
-                Settings = settings, ExpiresAt = DateTime.UtcNow.AddSeconds(config.RoomSeconds) };
+                CreationFingerprint = fingerprint, Settings = settings, ExpiresAt = DateTime.UtcNow.AddSeconds(config.RoomSeconds) };
             await store.Rooms.InsertOneAsync(s, room, cancellationToken: token);
             await store.Seats.InsertOneAsync(s, new OnlineSeat { UserId = userId, Kind = "Room", ReferenceId = room.Id }, cancellationToken: token);
             await Emit(s, "RoomUpdated", Room(room), room.Members, token); return Room(room);
         }, ct);
+    }
+    private static string RoomCreationFingerprint(GameSettings settings) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(OnlineJson.Write(settings))));
+
+    private async Task EnsureRoomCreationFingerprint(IClientSessionHandle s, OnlineRoom room, CancellationToken ct)
+    {
+        if (!string.IsNullOrEmpty(room.CreationFingerprint)) return;
+        // Older rooms have no fingerprint. Recover the original settings from the creation
+        // event rather than treating the room's mutable settings as the original request.
+        var filter = Builders<OnlineEvent>.Filter.Eq(e => e.Type, "RoomUpdated") &
+            Builders<OnlineEvent>.Filter.Eq(e => e.MatchId, null) &
+            Builders<OnlineEvent>.Filter.AnyEq(e => e.Recipients, room.CreatorId) &
+            Builders<OnlineEvent>.Filter.Regex(e => e.PayloadJson,
+                new BsonRegularExpression("^\\{\"roomId\":\"" + Regex.Escape(room.Id) + "\""));
+        var creation = await store.Events.Find(s, filter).SortBy(e => e.CreatedAt).FirstOrDefaultAsync(ct);
+        var original = creation is null ? null : JsonSerializer.Deserialize<RoomSnapshot>(creation.PayloadJson, OnlineJson.Options);
+        if (original is null || original.RoomId != room.Id || original.Code != room.Code ||
+            original.OwnerId != room.CreatorId || original.Members.Count != 1 || original.Members[0] != room.CreatorId)
+            throw new OnlineException("RoomCreationRequestUnavailable");
+        room.CreationFingerprint = RoomCreationFingerprint(original.Settings);
+        await store.Rooms.UpdateOneAsync(s, r => r.Id == room.Id,
+            Builders<OnlineRoom>.Update.Set(r => r.CreationFingerprint, room.CreationFingerprint), cancellationToken: ct);
     }
     public async Task<RoomSnapshot> JoinRoom(string userId, string code, CancellationToken ct)
     {
@@ -173,6 +201,7 @@ public sealed partial class OnlineService
             await UserAsync(s, userId, token); var r = await RoomAsync(s, roomId, userId, token);
             if (r.OwnerId != userId) throw new OnlineException("Forbidden", 403);
             if (r.Status != "Open" || r.ExpiresAt <= DateTime.UtcNow) throw new OnlineException("RoomClosed");
+            await EnsureRoomCreationFingerprint(s, r, token);
             r.Settings = settings;
             await store.Rooms.ReplaceOneAsync(s, x => x.Id == r.Id, r, cancellationToken: token);
             await Emit(s, "RoomUpdated", Room(r), r.Members, token); return Room(r);

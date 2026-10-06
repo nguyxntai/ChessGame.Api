@@ -114,6 +114,8 @@ kỹ năng miễn lượt không được cộng. Đồng hồ chưa chạy tron
 Hết ready/setup deadline thì hủy, không đổi Elo/thưởng. Mất toàn bộ kết nối hub của một người
 thì bắt đầu grace; hết grace thua abandonment. Nếu hai deadline abandonment bằng nhau thì hòa.
 Nếu timeout và abandonment cạnh tranh, deadline xảy ra trước quyết định kết quả.
+Ready/setup deadline được kiểm tra trước formation fallback và trước mọi lần `StartIfReady`:
+worker/recovery xử lý muộn sẽ phát `MatchCancelled`, không phát `MatchStarted` cho trận đã hết hạn.
 
 Sau restart: tải snapshot đã lưu, xử lý deadline đã hết; nếu còn chơi, đánh dấu offline và cho
 grace reconnect (không kéo dài deadline reconnect đã có). Lệnh, lịch sử, outbox và kết quả vẫn ở DB.
@@ -166,6 +168,11 @@ Mode nhận `Classic` hoặc `Aram`; initial 60–7200 giây, increment 0–60 g
 MMR lấy từ `users.stats.elo`. Pair khi settings khớp và chênh lệch Elo nằm trong range của cả hai;
 range mở rộng theo thời gian queue. Queue/reward không dựa vào rank client gửi.
 `requestId` lặp với cùng payload trả lại ticket/phòng cũ, payload khác trả `RequestIdConflict`.
+Phòng lưu `CreationFingerprint` từ settings đã chuẩn hóa của request tạo phòng. Đổi settings
+không thay fingerprint: tạo với A, đổi sang B, retry request A trả phòng cũ với settings B;
+dùng lại requestId đó để tạo với B bị `RequestIdConflict`.
+Phòng cũ thiếu fingerprint được phục hồi từ event `RoomUpdated` đầu tiên của phòng rồi lưu lại.
+Nếu không xác định được request tạo phòng gốc, trả `RoomCreationRequestUnavailable` (409).
 Muốn tạo lượt queue/phòng mới sau khi terminal, dùng requestId mới.
 Pagination: page 1–100000, pageSize 1–100; thứ tự move tăng theo sequence.
 
@@ -322,7 +329,12 @@ Finish lưu result, tăng stats, đổi Elo, cộng wallet và ghi currency ledg
 Status Finished + index ledger `(userId,requestId,entryIndex)` chống áp dụng lần hai.
 Không có endpoint nhận victory/result từ client.
 Matchmaking tính Elo theo K=32 với rating server; phòng riêng/rematch không đổi Elo.
-Thưởng dùng `MatchRewardPolicy.CalculateNetworkReward` hiện có của Unity:
+**Chỉ trận matchmaking rated nhận thưởng wallet.** Phòng riêng và mọi trận tái đấu đều
+`Rated=false`: Golds/Diamonds/Tickets trong result bằng 0, không cộng wallet hoặc ghi ledger thưởng,
+kể cả chơi đủ thời gian/số nước. Kết quả và thống kê thắng/hòa/thua vẫn được lưu.
+Đây là chính sách theo nguồn tạo trận, không dựa vào thời lượng hay số nước; điều kiện và mức thưởng
+của matchmaking rated giữ nguyên. Backend tự đặt Rated, client không quyết định điều kiện thưởng.
+Mức thưởng cho trận đủ điều kiện dùng `MatchRewardPolicy.CalculateNetworkReward` hiện có của Unity:
 
 | Kết quả | Golds | Diamonds | Tickets |
 | --- | ---: | ---: | ---: |
@@ -348,3 +360,11 @@ Thưởng dùng `MatchRewardPolicy.CalculateNetworkReward` hiện có của Unit
     shot expiry và cooldown, reconnect giữa phiên ngắm.
 13. Đọc `/result`, `/users/me/matches`, `/users/me` và ledger: stats/Elo/wallet đúng một lần;
     kiểm tra equip sau start không thay loadout snapshot đang chơi.
+14. Phòng riêng: ready rồi resign ngay, tái đấu và lặp lại. Cả hai result đều có thưởng 0,
+    wallet/Elo không tăng, không có ledger ONLINE_MATCH cho các trận này; matchmaking vẫn có thưởng.
+15. Tạo phòng với settings A, đổi settings B, retry requestId gốc với A: trả cùng roomId và settings B.
+    Retry cùng requestId với B: RequestIdConflict. Thử lại với phòng cũ thiếu CreationFingerprint.
+16. Snipe Rook đang chở Pawn: Rook bị loại, bên sở hữu Rook có deployment Pawn quanh ô Rook;
+    deploy đúng vùng trống 3x3 và kiểm tra promotion ở hàng cuối.
+17. Formation hết hạn nhưng ready/setup chưa hết: fallback vẫn có thể bắt đầu trận.
+    Worker/recovery xử lý tại hoặc sau ready/setup deadline: chỉ MatchCancelled, không MatchStarted.

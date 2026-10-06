@@ -446,7 +446,7 @@ public sealed class AramEngine
                     victim.Team != team && victim.Kind != "King" && Math.Abs(to.File - from.File) == Math.Abs(to.Rank - from.Rank) &&
                     MovementRules.IsPathClear(GameRules.Read(m).Board, from, to), "InvalidAbilityTarget");
                 CaptureEffects(m, bishop, victim, from, to); Effect(m, bishop).SniperUntil = null;
-                Remove(m, victim, false); Detonate(m, victim, to); Require(!InCheck(m, team), "KingInCheck");
+                Remove(m, victim); Detonate(m, victim, to); Require(!InCheck(m, team), "KingInCheck");
                 m.EnPassantTarget = "-"; m.HalfMoveClock = 0; CompleteTurn(m, team); break;
             case "Escape":
                 Require(Has(side, 20) && a.EscapeTeam == team && side.EscapeUses < 3);

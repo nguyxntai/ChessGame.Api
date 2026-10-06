@@ -9,6 +9,7 @@ public sealed class OnlineRoom
     public string OwnerId { get; set; } = "";
     public string CreatorId { get; set; } = "";
     public string RequestId { get; set; } = "";
+    public string? CreationFingerprint { get; set; }
     public List<string> Members { get; set; } = new();
     public GameSettings Settings { get; set; } = new();
     public string Status { get; set; } = "Open";

@@ -191,7 +191,9 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ar
     }
     private async Task StartIfReady(IClientSessionHandle s, OnlineMatch m, DateTime now, CancellationToken ct)
     {
-        if (m.Status != "AwaitingReady" || !m.Players.All(p => p.Ready && p.Connected) || !aram.SetupDone(m)) return;
+        if (m.Status != "AwaitingReady") return;
+        if (ReadyExpired(m, now)) { await Cancel(s, m, "ReadyTimeout", now, ct); return; }
+        if (!m.Players.All(p => p.Ready && p.Connected) || !aram.SetupDone(m)) return;
         // Revalidate against current inventory and then freeze this loadout for the lifetime of the match.
         try
         {
@@ -230,14 +232,17 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ar
         double expected = 1 / (1 + Math.Pow(10, (black.Stats.Elo - white.Stats.Elo) / 400.0));
         double score = winnerTeam is null ? .5 : winnerTeam == "White" ? 1 : 0;
         int whiteDelta = m.Rated ? (int)Math.Round(config.EloK * (score - expected), MidpointRounding.AwayFromZero) : 0;
+        // Only rated matchmaking awards wallet currency. Private rooms and all rematches
+        // are unrated, so repeated resignations cannot mint currency through these flows.
+        bool rewardEligible = m.Rated;
         foreach (var user in new[] { white, black })
         {
             var p = m.Players.Single(p => p.UserId == user.Id.ToString());
             bool win = p.Color == winnerTeam, draw = winnerTeam is null;
             int delta = p.Color == "White" ? whiteDelta : -whiteDelta;
             var entry = new PlayerResult { UserId = p.UserId, RatingBefore = user.Stats.Elo,
-                RatingAfter = Math.Max(0, user.Stats.Elo + delta), Golds = win ? 360 : draw ? 180 : 85,
-                Diamonds = win ? 12 : draw ? 6 : 3, Tickets = win ? 1 : 0 };
+                RatingAfter = Math.Max(0, user.Stats.Elo + delta), Golds = rewardEligible ? (win ? 360 : draw ? 180 : 85) : 0,
+                Diamonds = rewardEligible ? (win ? 12 : draw ? 6 : 3) : 0, Tickets = rewardEligible && win ? 1 : 0 };
             entry.RatingChange = entry.RatingAfter - entry.RatingBefore;
             var update = Builders<User>.Update.Set(u => u.Stats.Elo, entry.RatingAfter)
                 .Inc(u => u.Stats.GamesPlayed, 1).Inc(u => u.Stats.Wins, win ? 1 : 0)
@@ -259,18 +264,21 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ar
         await store.Seats.DeleteManyAsync(s, x => x.ReferenceId == m.Id && x.Kind == "Match", cancellationToken: ct);
         await MatchEvent(s, m, "MatchEnded", now, ct); await Save(s, m, ct);
     }
+    private static bool ReadyExpired(OnlineMatch m, DateTime now) => now >= m.ReadyDeadline ||
+        m.Aram is { Phase: not "Playing" } a && now >= a.SetupDeadline;
+
     private async Task Advance(IClientSessionHandle s, OnlineMatch m, DateTime now, CancellationToken ct)
     {
         if (!Active(m)) return;
         if (m.Status == "AwaitingReady")
         {
+            // Expiration takes precedence over formation fallback, including delayed sweeps/recovery.
+            if (ReadyExpired(m, now)) { await Cancel(s, m, "ReadyTimeout", now, ct); return; }
             if (aram.Tick(m, now))
             {
                 m.StateVersion++; await MatchEvent(s, m, "GameStateUpdated", now, ct);
                 await StartIfReady(s, m, now, ct); await Save(s, m, ct);
             }
-            if (now >= m.ReadyDeadline || m.Aram is { Phase: not "Playing" } a && now >= a.SetupDeadline)
-                await Cancel(s, m, "ReadyTimeout", now, ct);
             return;
         }
         // Resolve competing deadlines by their actual expiration instant, not worker iteration order.
