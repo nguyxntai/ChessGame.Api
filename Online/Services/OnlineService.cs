@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using ChessButWeird.Domain;
 using ChessGame.Api.Models;
+using ChessGame.Api.Services.Ratings;
 using Microsoft.Extensions.Options;
 using MongoDB.Bson;
 using MongoDB.Driver;
@@ -18,7 +19,7 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ar
     private static PlayerSnapshot Player(MatchPlayer p) => new(p.UserId, p.Username, p.DisplayName, p.Color, p.Rating,
         p.Ready, p.Connected, p.ReconnectDeadline, p.Loadout);
     private static MatchSummary Summary(OnlineMatch m) => new(m.Id, m.Status, m.Settings, m.Players.Select(Player).ToList(),
-        m.CreatedAt, m.StartedAt, m.FinishedAt, m.Result);
+        m.CreatedAt, m.StartedAt, m.FinishedAt, m.Result, m.Rated);
     private static double Elapsed(OnlineMatch m, DateTime now) => m.ClockStartedAt is null ? 0 : Math.Max(0, (now - m.ClockStartedAt.Value).TotalMilliseconds);
     public static MatchSnapshot Snapshot(OnlineMatch m, DateTime now, string? userId = null)
     {
@@ -32,7 +33,7 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ar
             m.Board.Select(p => new PieceSnapshot(p.Id, p.Kind, p.Team, p.Square, p.HasMoved, p.Forward)).ToList(),
             m.Aram is null ? fen : null, fen.Split(' ')[2], m.EnPassantTarget, m.HalfMoveClock, m.FullMoveNumber,
             new(Math.Max(0, white), Math.Max(0, black), m.ClockStartedAt is not null && m.Status == "InProgress" ? m.Turn : null, now),
-            m.Players.Select(Player).ToList(), m.ReadyDeadline, m.DrawOffer, custom, m.Result, m.RematchId);
+            m.Players.Select(Player).ToList(), m.ReadyDeadline, m.DrawOffer, custom, m.Result, m.RematchId, m.Rated);
     }
     private GameSettings ValidateSettings(GameSettings settings)
     {
@@ -107,7 +108,14 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ar
         }, ct);
     }
     public async Task<MatchSummary> GetMatch(string userId, string matchId, CancellationToken ct)
-    { await State(userId, matchId, ct); return Summary((await store.Matches.Find(m => m.Id == matchId).FirstOrDefaultAsync(ct))!); }
+    {
+        OnlineIdentity.Id(matchId);
+        await RequireActiveReader(userId, ct);
+        var match = await store.Matches.Find(m => m.Id == matchId).Project(SummaryProjection).FirstOrDefaultAsync(ct)
+            ?? throw new OnlineException("MatchNotFound", 404);
+        if (!match.Players.Any(p => p.UserId == userId)) throw new OnlineException("Forbidden", 403);
+        return Summary(match);
+    }
     public async Task<OfficialResult> Result(string userId, string matchId, CancellationToken ct)
     {
         var snapshot = await State(userId, matchId, ct);
@@ -115,14 +123,15 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ar
     }
     public async Task<Page<MatchSummary>> History(string userId, int page, int pageSize, CancellationToken ct)
     {
-        lease.RequireOwner(); Pagination(page, pageSize);
-        if (!await store.Users.Find(u => u.Id == ObjectId.Parse(userId) && u.IsActive).AnyAsync(ct)) throw new OnlineException("Forbidden", 403);
-        var f = Builders<OnlineMatch>.Filter.ElemMatch(m => m.Players, p => p.UserId == userId) &
+        Pagination(page, pageSize);
+        await RequireActiveReader(userId, ct);
+        var f = Builders<OnlineMatch>.Filter.Eq("Players.UserId", userId) &
             Builders<OnlineMatch>.Filter.In(m => m.Status, new[] { "Finished", "Cancelled" });
-        var count = await store.Matches.CountDocumentsAsync(f, cancellationToken: ct);
-        var matches = await store.Matches.Find(f).SortByDescending(m => m.CreatedAt).ThenByDescending(m => m.Id)
-            .Skip((page - 1) * pageSize).Limit(pageSize).ToListAsync(ct);
-        return new(page, pageSize, count, matches.Select(Summary).ToList());
+        var count = store.Matches.CountDocumentsAsync(f, cancellationToken: ct);
+        var matches = store.Matches.Find(f).SortByDescending(m => m.CreatedAt).ThenByDescending(m => m.Id)
+            .Skip((page - 1) * pageSize).Limit(pageSize).Project(SummaryProjection).ToListAsync(ct);
+        await Task.WhenAll(count, matches);
+        return new(page, pageSize, await count, (await matches).Select(Summary).ToList());
     }
     public async Task<Page<OnlineMove>> Moves(string userId, string matchId, int page, int pageSize, long? afterSequence, CancellationToken ct)
     {
@@ -160,18 +169,20 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ar
         }
         return result;
     }
-    private async Task<OnlineMatch> CreateMatch(IClientSessionHandle s, List<string> ids, GameSettings settings, bool rated, DateTime now, CancellationToken ct)
+    private async Task<OnlineMatch> CreateMatch(IClientSessionHandle s, List<string> ids, GameSettings settings, bool rated, DateTime now, CancellationToken ct, MatchmakingDiagnostics? quality = null)
     {
         if (ids.Count != 2 || ids.Distinct().Count() != 2) throw new OnlineException("InvalidParticipants");
-        var ordered = RandomNumberGenerator.GetInt32(2) == 0 ? ids : ids.AsEnumerable().Reverse().ToList();
-        var m = new OnlineMatch { Settings = settings, Rated = rated, CreatedAt = now, ReadyDeadline = now.AddSeconds(config.ReadySeconds),
+        var first = await UserAsync(s, ids[0], ct); var second = await UserAsync(s, ids[1], ct);
+        var ordered = MatchmakingPolicy.FirstIsWhite(first.OnlineColors.For(settings.Mode), second.OnlineColors.For(settings.Mode),
+            () => RandomNumberGenerator.GetInt32(2) == 0) ? ids : ids.AsEnumerable().Reverse().ToList();
+        var m = new OnlineMatch { Settings = settings, Rated = rated, Matchmaking = quality, CreatedAt = now, ReadyDeadline = now.AddSeconds(config.ReadySeconds),
             WhiteMilliseconds = settings.InitialSeconds * 1000.0, BlackMilliseconds = settings.InitialSeconds * 1000.0 };
         foreach (var id in ordered)
         {
-            var user = await UserAsync(s, id, ct);
+            var user = id == first.Id.ToString() ? first : second;
             bool connected = await store.Connections.Find(s, x => x.UserId == id && x.ExpiresAt > now).AnyAsync(ct);
             m.Players.Add(new MatchPlayer { UserId = id, Username = user.Username, DisplayName = user.Profile.DisplayName,
-                Color = m.Players.Count == 0 ? "White" : "Black", Rating = user.Stats.Elo, Connected = connected, Loadout = await Loadout(s, user, ct) });
+                Color = m.Players.Count == 0 ? "White" : "Black", Rating = RatingPolicies.Display(user.Ratings.For(settings.Mode).Rating), Connected = connected, Loadout = await Loadout(s, user, ct) });
             await store.Seats.ReplaceOneAsync(s, x => x.UserId == id, new OnlineSeat { UserId = id, Kind = "Match", ReferenceId = m.Id },
                 new ReplaceOptions { IsUpsert = true }, ct);
         }
@@ -229,25 +240,32 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ar
             ?? throw new InvalidOperationException("A match participant was deleted.");
         var black = await store.Users.Find(s, u => u.Id == blackId).FirstOrDefaultAsync(ct)
             ?? throw new InvalidOperationException("A match participant was deleted.");
-        double expected = 1 / (1 + Math.Pow(10, (black.Stats.Elo - white.Stats.Elo) / 400.0));
         double score = winnerTeam is null ? .5 : winnerTeam == "White" ? 1 : 0;
-        int whiteDelta = m.Rated ? (int)Math.Round(config.EloK * (score - expected), MidpointRounding.AwayFromZero) : 0;
-        // Only rated matchmaking awards wallet currency. Private rooms and all rematches
-        // are unrated, so repeated resignations cannot mint currency through these flows.
-        bool rewardEligible = m.Rated;
+        var eligibility = await SettlementEligibility(s, m, result, now, ct);
+        var beforeWhite = white.Ratings.For(m.Settings.Mode);
+        var beforeBlack = black.Ratings.For(m.Settings.Mode);
+        // Both calculations use the same pre-settlement states; never feed the winner's new rating to the loser.
+        ModeRating Calculate(ModeRating player, ModeRating opponent, double value) => !eligibility.Rating ? player :
+            m.Settings.Mode == "Classic" ? RatingPolicies.Classic(player, opponent, value, now) : RatingPolicies.Aram(player, opponent, value, now);
+        var afterWhite = Calculate(beforeWhite, beforeBlack, score);
+        var afterBlack = Calculate(beforeBlack, beforeWhite, 1 - score);
         foreach (var user in new[] { white, black })
         {
             var p = m.Players.Single(p => p.UserId == user.Id.ToString());
             bool win = p.Color == winnerTeam, draw = winnerTeam is null;
-            int delta = p.Color == "White" ? whiteDelta : -whiteDelta;
-            var entry = new PlayerResult { UserId = p.UserId, RatingBefore = user.Stats.Elo,
-                RatingAfter = Math.Max(0, user.Stats.Elo + delta), Golds = rewardEligible ? (win ? 360 : draw ? 180 : 85) : 0,
-                Diamonds = rewardEligible ? (win ? 12 : draw ? 6 : 3) : 0, Tickets = rewardEligible && win ? 1 : 0 };
+            var before = user.Ratings.For(m.Settings.Mode);
+            var after = p.Color == "White" ? afterWhite : afterBlack;
+            var entry = new PlayerResult { UserId = p.UserId, RatingBefore = RatingPolicies.Display(before.Rating),
+                RatingAfter = RatingPolicies.Display(after.Rating), Golds = eligibility.Rewards ? (win ? 360 : draw ? 180 : 85) : 0,
+                Diamonds = eligibility.Rewards ? (win ? 12 : draw ? 6 : 3) : 0, Tickets = eligibility.Rewards && win ? 1 : 0,
+                RatingDeviationAfter = m.Settings.Mode != "Classic" ? after.Deviation : null, RatedGamesAfter = after.RatedGames };
             entry.RatingChange = entry.RatingAfter - entry.RatingBefore;
-            var update = Builders<User>.Update.Set(u => u.Stats.Elo, entry.RatingAfter)
-                .Inc(u => u.Stats.GamesPlayed, 1).Inc(u => u.Stats.Wins, win ? 1 : 0)
-                .Inc(u => u.Stats.Draws, draw ? 1 : 0).Inc(u => u.Stats.Losses, !win && !draw ? 1 : 0)
-                .Inc(u => u.Wallet.Golds, entry.Golds).Inc(u => u.Wallet.Diamonds, entry.Diamonds)
+            var update = Builders<User>.Update.Set(u => u.UpdatedAt, now);
+            if (eligibility.Rating) update = update.Set(m.Settings.Mode == "Classic" ? "ratings.classic" : "ratings.aram", after);
+            if (result.StatsApplied) update = update.Set(m.Settings.Mode == "Classic" ? "onlineColors.classic" : "onlineColors.aram",
+                user.OnlineColors.For(m.Settings.Mode).Played(p.Color)).Inc(u => u.Stats.GamesPlayed, 1).Inc(u => u.Stats.Wins, win ? 1 : 0)
+                .Inc(u => u.Stats.Draws, draw ? 1 : 0).Inc(u => u.Stats.Losses, !win && !draw ? 1 : 0);
+            update = update.Inc(u => u.Wallet.Golds, entry.Golds).Inc(u => u.Wallet.Diamonds, entry.Diamonds)
                 .Inc(u => u.Wallet.Tickets, entry.Tickets).Set(u => u.UpdatedAt, now);
             var updated = await store.Users.FindOneAndUpdateAsync(s, Builders<User>.Filter.Eq(u => u.Id, user.Id), update,
                 new FindOneAndUpdateOptions<User> { ReturnDocument = ReturnDocument.After }, ct);

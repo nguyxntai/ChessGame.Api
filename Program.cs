@@ -24,7 +24,10 @@ builder.Services.AddOptions<OnlineOptions>()
     .Bind(builder.Configuration.GetSection("Online"))
     .Validate(o => o.ProtocolVersion > 0 && o.QueueSeconds > 0 && o.ReadySeconds > 0 &&
         o.ReconnectSeconds > 0 && o.DrawOfferSeconds > 0 && o.RoomSeconds > 0 &&
-        o.InitialRatingRange >= 0 && o.RatingRangePerSecond >= 0 && o.EloK is > 0 and <= 128,
+        o.InitialRatingRange >= 0 && o.RatingRangePerSecond >= 0 && o.MaximumRatingRange >= o.InitialRatingRange &&
+        o.CandidatesPerPool is >= 4 and <= 128 && o.CandidatesPerPool % 2 == 0 && o.PoolsPerSweep is >= 1 and <= 8 &&
+        o.MaximumPairsPerSweep is >= 1 and <= 16 && o.RecentOpponentSeconds >= 0 && o.RecentOpponentRelaxSeconds >= 0 &&
+        o.MaximumLatencyDifferenceMilliseconds > 0,
         "Online deadlines, protocol and rating configuration are invalid.")
     .ValidateOnStart();
 builder.Services.AddSingleton<OnlineRuntimeLease>();
@@ -33,6 +36,7 @@ builder.Services.AddSingleton<AramEngine>();
 builder.Services.AddSingleton<GameRules>();
 builder.Services.AddSingleton<OnlineService>();
 builder.Services.AddSingleton<LiveConnections>();
+builder.Services.AddSingleton<NetworkQualityTracker>();
 builder.Services.AddScoped<OnlineExceptionFilter>();
 builder.Services.AddHostedService<OnlineWorker>();
 
@@ -134,6 +138,7 @@ builder.Services.AddSingleton<IMongoDatabase>(
 
 // Application Services
 builder.Services.AddScoped<UserService>();
+builder.Services.AddScoped<LeaderboardService>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<InventoryService>();
 builder.Services.AddScoped<GachaService>();
@@ -217,6 +222,7 @@ app.UseSwaggerUI(options =>
 });
 
 // Tạo MongoDB indexes
+await ChessGame.Api.Services.Ratings.RatingMigration.InitializeAsync(app.Services.GetRequiredService<IMongoDatabase>());
 using (var scope = app.Services.CreateScope())
 {
     var userService =

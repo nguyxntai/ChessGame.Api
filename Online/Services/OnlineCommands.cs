@@ -113,11 +113,11 @@ public sealed partial class OnlineService
     public async Task<MatchSnapshot> SetReady(string userId, string matchId, CancellationToken ct)
     {
         lease.RequireOwner(); OnlineIdentity.Id(matchId);
-        return await store.Transaction(async (s, token) =>
+        var snapshot = await store.Transaction(async (s, token) =>
         {
             await UserAsync(s, userId, token); var m = await MatchAsync(s, matchId, userId, token); var now = DateTime.UtcNow;
             await Advance(s, m, now, token);
-            if (!Active(m)) throw new OnlineException("MatchNotActive");
+            if (!Active(m)) return Snapshot(m, now, userId);
             var player = m.Players.Single(p => p.UserId == userId);
             if (!player.Ready)
             {
@@ -128,17 +128,23 @@ public sealed partial class OnlineService
             }
             return Snapshot(m, now, userId);
         }, ct);
+        // Persist server-driven cancellation/settlement before returning the command error.
+        if (snapshot.Status is not ("AwaitingReady" or "InProgress")) throw new OnlineException("MatchNotActive");
+        return snapshot;
     }
     public async Task<MatchSnapshot> Decline(string userId, string matchId, CancellationToken ct)
     {
         lease.RequireOwner(); OnlineIdentity.Id(matchId);
-        return await store.Transaction(async (s, token) =>
+        var outcome = await store.Transaction(async (s, token) =>
         {
             await UserAsync(s, userId, token); var m = await MatchAsync(s, matchId, userId, token); var now = DateTime.UtcNow;
             await Advance(s, m, now, token);
-            if (m.Status != "AwaitingReady") throw new OnlineException("MatchNotActive");
-            await Cancel(s, m, "PlayerDeclined", now, token); return Snapshot(m, now, userId);
+            bool canDecline = m.Status == "AwaitingReady";
+            if (canDecline) await Cancel(s, m, "PlayerDeclined", now, token);
+            return (canDecline, snapshot: Snapshot(m, now, userId));
         }, ct);
+        if (!outcome.canDecline) throw new OnlineException("MatchNotActive");
+        return outcome.snapshot;
     }
     public async Task<MatchSnapshot> Rematch(string userId, string matchId, bool? accept, CancellationToken ct)
     {

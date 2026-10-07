@@ -127,7 +127,17 @@ public class UserService
             {
                 usernameIndex,
                 emailIndex,
-                eloIndex
+                eloIndex,
+                new CreateIndexModel<User>(Builders<User>.IndexKeys.Ascending(user => user.IsActive)
+                    .Descending(user => user.Ratings.Classic.Rating).Ascending(user => user.Id),
+                    new CreateIndexOptions { Name = "idx_users_leaderboard_classic" }),
+                new CreateIndexModel<User>(Builders<User>.IndexKeys.Ascending(user => user.IsActive)
+                    .Descending(user => user.Ratings.Aram.Rating).Ascending(user => user.Id),
+                    new CreateIndexOptions { Name = "idx_users_leaderboard_aram" }),
+                new CreateIndexModel<User>(Builders<User>.IndexKeys.Ascending(user => user.IsActive).Descending(user => user.Ratings.Classic.Rating).Ascending(user => user.Id),
+                    new CreateIndexOptions<User> { Name = "idx_users_established_classic", PartialFilterExpression = Builders<User>.Filter.Gte(user => user.Ratings.Classic.RatedGames, 10) }),
+                new CreateIndexModel<User>(Builders<User>.IndexKeys.Ascending(user => user.IsActive).Descending(user => user.Ratings.Aram.Rating).Ascending(user => user.Id),
+                    new CreateIndexOptions<User> { Name = "idx_users_established_aram", PartialFilterExpression = Builders<User>.Filter.Gte(user => user.Ratings.Aram.RatedGames, 10) })
             }
         );
     }

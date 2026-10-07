@@ -149,11 +149,13 @@ public class UsersController : ControllerBase
                             user.Wallet.Tickets
                     },
 
+                Ratings = user.Ratings,
+
                 Stats =
                     new PlayerStatsResponse
                     {
                         Elo =
-                            user.Stats.Elo,
+                            ChessGame.Api.Services.Ratings.RatingPolicies.Display(user.Ratings.Classic.Rating),
 
                         Wins =
                             user.Stats.Wins,

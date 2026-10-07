@@ -1,10 +1,11 @@
+using MongoDB.Driver;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 
 namespace ChessGame.Api.Online;
 
 [Authorize]
-public sealed class GameHub(OnlineService service, LiveConnections live) : Hub
+public sealed class GameHub(OnlineService service, LiveConnections live, NetworkQualityTracker network, OnlineStore store) : Hub
 {
     private string UserId => OnlineIdentity.UserId(Context.User);
     public override async Task OnConnectedAsync()
@@ -19,6 +20,7 @@ public sealed class GameHub(OnlineService service, LiveConnections live) : Hub
     }
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
+        network.Remove(Context.ConnectionId);
         live.Users.TryRemove(Context.ConnectionId, out var id);
         if (id is not null)
             try { await service.Disconnected(id, Context.ConnectionId, CancellationToken.None); }
@@ -27,6 +29,20 @@ public sealed class GameHub(OnlineService service, LiveConnections live) : Hub
     }
     private static async Task<T> Invoke<T>(Func<Task<T>> action)
     { try { return await action(); } catch (OnlineException ex) { throw new HubException(ex.Code); } }
+    public Task<string> BeginLatencyProbe() => Invoke(() => {
+        if (!live.Users.TryGetValue(Context.ConnectionId, out var id) || id != UserId) throw new OnlineException("Forbidden", 403);
+        return Task.FromResult(network.Begin(Context.ConnectionId));
+    });
+    public Task<LatencySample> CompleteLatencyProbe(string nonce) => Invoke(async () => {
+        if (!live.Users.TryGetValue(Context.ConnectionId, out var id) || id != UserId) throw new OnlineException("Forbidden", 403);
+        var sample = network.Complete(Context.ConnectionId, nonce);
+        // Ping writes do not acquire the gameplay coordinator. An older sample cannot overwrite a newer one.
+        await store.Connections.UpdateOneAsync(x => x.Id == Context.ConnectionId && x.UserId == id && x.ExpiresAt > sample.MeasuredAt &&
+            (x.LatencyMeasuredAt == null || x.LatencyMeasuredAt <= sample.MeasuredAt), Builders<OnlineConnection>.Update
+            .Set(x => x.RoundTripMilliseconds, sample.RoundTripMilliseconds).Set(x => x.JitterMilliseconds, sample.JitterMilliseconds)
+            .Set(x => x.LatencySamples, sample.Samples).Set(x => x.LatencyMeasuredAt, sample.MeasuredAt), cancellationToken: Context.ConnectionAborted);
+        return sample;
+    });
     // Events are addressed to authenticated user IDs, so live delivery is active before this snapshot.
     // Buffer them while SubscribeMatch is pending, discard <= ResumeAfterSequence, then apply/replay in order.
     public Task<SubscriptionSnapshot> SubscribeMatch(string matchId) => Invoke(async () =>

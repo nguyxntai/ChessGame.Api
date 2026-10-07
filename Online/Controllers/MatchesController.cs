@@ -7,11 +7,22 @@ namespace ChessGame.Api.Online;
 public sealed class MatchesController(OnlineService service) : ControllerBase
 {
     private string UserId => OnlineIdentity.UserId(User);
+    [HttpPost]
+    public async Task<IActionResult> Create(CreateMatchRequest request, CancellationToken ct)
+    {
+        var match = await service.StartRoom(UserId, request.RoomId, ct);
+        return CreatedAtAction(nameof(Get), new { matchId = match.MatchId }, match);
+    }
+    [HttpPost("{matchId}/complete")]
+    public async Task<IActionResult> Complete(string matchId, CompleteMatchRequest request, CancellationToken ct) =>
+        Ok(await service.CompleteMatch(UserId, matchId, ct));
     [HttpGet("current")] public async Task<IActionResult> Current(CancellationToken ct) => Ok(await service.CurrentMatch(UserId, ct));
     [HttpGet("{matchId}")] public async Task<IActionResult> Get(string matchId, CancellationToken ct) => Ok(await service.GetMatch(UserId, matchId, ct));
     [HttpGet("{matchId}/state")] public async Task<IActionResult> State(string matchId, CancellationToken ct) => Ok(await service.State(UserId, matchId, ct));
     [HttpGet("{matchId}/moves")] public async Task<IActionResult> Moves(string matchId, CancellationToken ct, int page = 1, int pageSize = 20, long? afterSequence = null) =>
         Ok(await service.Moves(UserId, matchId, page, pageSize, afterSequence, ct));
     [HttpGet("{matchId}/result")] public async Task<IActionResult> Result(string matchId, CancellationToken ct) => Ok(await service.Result(UserId, matchId, ct));
-    [HttpGet("/api/users/me/matches")] public async Task<IActionResult> History(CancellationToken ct, int page = 1, int pageSize = 20) => Ok(await service.History(UserId, page, pageSize, ct));
+    [HttpGet("history"), HttpGet("/api/users/me/matches")]
+    public async Task<IActionResult> History(CancellationToken ct, int page = 1, int pageSize = 20) =>
+        Ok(await service.History(UserId, page, pageSize, ct));
 }

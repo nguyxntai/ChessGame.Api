@@ -35,6 +35,12 @@ public class User
     [BsonElement("stats")]
     public PlayerStats Stats { get; set; } = new();
 
+    [BsonElement("ratings")]
+    public PlayerRatings Ratings { get; set; } = new();
+
+    [BsonElement("onlineColors")]
+    public ColorHistories OnlineColors { get; set; } = new();
+
     [BsonElement("equipped")]
     public EquippedSkins Equipped { get; set; } = new();
 

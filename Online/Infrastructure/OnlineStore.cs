@@ -8,6 +8,7 @@ public sealed class OnlineStore
 {
     public IMongoCollection<OnlineMatch> Matches { get; }
     public IMongoCollection<OnlineTicket> Tickets { get; }
+    public IMongoCollection<QueuePool> Pools { get; }
     public IMongoCollection<OnlineSeat> Seats { get; }
     public IMongoCollection<OnlineRoom> Rooms { get; }
     public IMongoCollection<OnlineCommand> Commands { get; }
@@ -29,6 +30,7 @@ public sealed class OnlineStore
         this.runtimeLease = runtimeLease;
         Matches = db.GetCollection<OnlineMatch>("online_matches");
         Tickets = db.GetCollection<OnlineTicket>("online_tickets");
+        Pools = db.GetCollection<QueuePool>("online_queue_pools");
         Seats = db.GetCollection<OnlineSeat>("online_player_seats");
         Rooms = db.GetCollection<OnlineRoom>("online_rooms");
         Commands = db.GetCollection<OnlineCommand>("online_commands");
@@ -66,16 +68,30 @@ public sealed class OnlineStore
         await Tickets.Indexes.CreateManyAsync(new[] {
             new CreateIndexModel<OnlineTicket>(Builders<OnlineTicket>.IndexKeys.Ascending(x => x.UserId).Ascending(x => x.RequestId), new CreateIndexOptions { Unique = true }),
             new CreateIndexModel<OnlineTicket>(Builders<OnlineTicket>.IndexKeys.Ascending(x => x.Status).Ascending(x => x.CreatedAt)) });
+        await Tickets.Indexes.CreateManyAsync(new[] {
+            new CreateIndexModel<OnlineTicket>(Builders<OnlineTicket>.IndexKeys.Ascending(x => x.Status).Ascending(x => x.PoolKey).Ascending(x => x.CreatedAt).Ascending(x => x.Id), new CreateIndexOptions { Name = "queue_pool_cursor" }),
+            new CreateIndexModel<OnlineTicket>(Builders<OnlineTicket>.IndexKeys.Ascending(x => x.Status).Ascending(x => x.ExpiresAt), new CreateIndexOptions { Name = "queue_expiration" }) });
+        await Pools.Indexes.CreateOneAsync(new CreateIndexModel<QueuePool>(Builders<QueuePool>.IndexKeys.Ascending(x => x.LastServedAt).Ascending(x => x.Id)));
+        await Matches.Indexes.CreateOneAsync(new CreateIndexModel<OnlineMatch>(Builders<OnlineMatch>.IndexKeys.Descending(x => x.CreatedAt), new CreateIndexOptions { Name = "match_quality_window" }));
         await Rooms.Indexes.CreateManyAsync(new[] {
             new CreateIndexModel<OnlineRoom>(Builders<OnlineRoom>.IndexKeys.Ascending(x => x.Code), new CreateIndexOptions { Unique = true }),
             new CreateIndexModel<OnlineRoom>(Builders<OnlineRoom>.IndexKeys.Ascending(x => x.CreatorId).Ascending(x => x.RequestId), new CreateIndexOptions { Unique = true }) });
         await Matches.Indexes.CreateManyAsync(new[] {
+            new CreateIndexModel<OnlineMatch>(Builders<OnlineMatch>.IndexKeys.Ascending(x => x.SettlementPairKey)
+                .Ascending("Result.RatingApplied").Descending(x => x.FinishedAt),
+                new CreateIndexOptions { Name = "online_settlement_pair_window" }),
             new CreateIndexModel<OnlineMatch>(Builders<OnlineMatch>.IndexKeys.Ascending("Players.UserId").Descending(x => x.CreatedAt)),
+            new CreateIndexModel<OnlineMatch>(Builders<OnlineMatch>.IndexKeys.Ascending("Players.UserId")
+                .Ascending(x => x.Status).Descending(x => x.CreatedAt).Descending(x => x.Id),
+                new CreateIndexOptions { Name = "online_history_by_player" }),
             new CreateIndexModel<OnlineMatch>(Builders<OnlineMatch>.IndexKeys.Ascending(x => x.Status)) });
         await Commands.Indexes.CreateOneAsync(new CreateIndexModel<OnlineCommand>(Builders<OnlineCommand>.IndexKeys
             .Ascending(x => x.MatchId).Ascending(x => x.UserId).Ascending(x => x.CommandId), new CreateIndexOptions { Unique = true }));
         await Moves.Indexes.CreateOneAsync(new CreateIndexModel<OnlineMove>(Builders<OnlineMove>.IndexKeys
             .Ascending(x => x.MatchId).Ascending(x => x.Sequence), new CreateIndexOptions { Unique = true }));
+        await Moves.Indexes.CreateOneAsync(new CreateIndexModel<OnlineMove>(Builders<OnlineMove>.IndexKeys
+            .Ascending(x => x.MatchId).Ascending(x => x.Kind).Ascending(x => x.UserId),
+            new CreateIndexOptions { Name = "online_moves_participation" }));
         await Events.Indexes.CreateManyAsync(new[] {
             new CreateIndexModel<OnlineEvent>(Builders<OnlineEvent>.IndexKeys.Ascending(x => x.Published).Ascending(x => x.CreatedAt)),
             new CreateIndexModel<OnlineEvent>(Builders<OnlineEvent>.IndexKeys.Ascending(x => x.MatchId).Ascending(x => x.Sequence)) });
