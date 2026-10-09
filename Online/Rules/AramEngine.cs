@@ -171,7 +171,7 @@ public sealed class AramEngine
         if (!TryMove(m, move, out var next)) throw new OnlineException("InvalidMove");
         // TryMove's copy includes all ARAM effects. Copy back only after complete validation.
         m.Board = next.Board; m.Turn = next.Turn; m.EnPassantTarget = next.EnPassantTarget;
-        m.HalfMoveClock = next.HalfMoveClock; m.FullMoveNumber = next.FullMoveNumber; m.Aram = next.Aram;
+        m.HalfMoveClock = next.HalfMoveClock; m.FullMoveNumber = next.FullMoveNumber; m.Aram = next.Aram; m.Captures = next.Captures;
     }
     private bool TryMove(OnlineMatch original, Move move, out OnlineMatch next, bool simulate = false)
     {
@@ -259,6 +259,7 @@ public sealed class AramEngine
         var side = Side(m, moving.Team); var e = Effect(m, moving);
         if (e.CannonUntil is not null && !MovementRules.IsPathClear(GameRules.Read(m).Board, from, to)) e.CannonUntil = side.CompletedTurns + 11;
         if (victim.Team == moving.Team) { if (Has(side, 6)) e.Bloodthirsty = true; return; }
+        if (!simulate) GameRules.RecordCapture(m, moving.Team, victim);
         if (Has(Side(m, victim.Team), 22)) e.InfectedUntil = side.CompletedTurns + 5;
         if (Has(side, 14)) side.Tickets += victim.Kind == "Pawn" ? 1 : victim.Kind == "Queen" ? 3 : 2;
         if (moving.Kind == "Bishop" && Has(side, 7) && victim.Kind != "Pawn" && Math.Max(Math.Abs(to.File - from.File), Math.Abs(to.Rank - from.Rank)) >= 4)
@@ -484,7 +485,8 @@ public sealed class AramEngine
                 new[] { square.File + box.HalfWidth, box.Height, square.Rank + box.HalfDepth });
             if (hit is not null && hit < distance) { distance = hit.Value; nearest = p; }
         }
-        if (nearest is not null && nearest.Team != side.Team && nearest.Kind is not ("King" or "Queen")) Remove(m, nearest);
+        if (nearest is not null && nearest.Team != side.Team && nearest.Kind is not ("King" or "Queen"))
+        { GameRules.RecordCapture(m, side.Team, nearest); Remove(m, nearest); }
         a.Rifle = null; side.RifleReady = side.CompletedTurns + 3;
     }
     private static double? RayBox(double[] origin, double[] dir, double[] min, double[] max)

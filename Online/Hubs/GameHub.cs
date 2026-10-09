@@ -36,7 +36,7 @@ public sealed class GameHub(OnlineService service, LiveConnections live) : Hub
     });
     public Task<EventReplay> ReplayEvents(string matchId, long afterSequence, int limit = 100) =>
         Invoke(() => service.Replay(UserId, matchId, afterSequence, limit, Context.ConnectionAborted));
-    public Task<MatchSnapshot> AcceptMatch(string matchId) => Invoke(() => service.State(UserId, matchId, Context.ConnectionAborted));
+    public Task<MatchSnapshot> AcceptMatch(string matchId) => Invoke(() => service.AcceptMatch(UserId, matchId, Context.ConnectionAborted));
     public Task<MatchSnapshot> DeclineMatch(string matchId) => Invoke(() => service.Decline(UserId, matchId, Context.ConnectionAborted));
     public Task<MatchSnapshot> SetReady(string matchId) => Invoke(() => service.SetReady(UserId, matchId, Context.ConnectionAborted));
     public Task<CommandAck> SubmitMove(string matchId, string commandId, long expectedVersion, MoveCommand move) =>

@@ -16,7 +16,7 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ar
     private static TicketSnapshot Ticket(OnlineTicket t) => new(t.Id, t.Status, t.Settings, t.CreatedAt, t.ExpiresAt, t.MatchId);
     private static RoomSnapshot Room(OnlineRoom r) => new(r.Id, r.Code, r.OwnerId, r.Members, r.Settings, r.Status, r.MatchId, r.ExpiresAt);
     private static PlayerSnapshot Player(MatchPlayer p) => new(p.UserId, p.Username, p.DisplayName, p.Color, p.Rating,
-        p.Ready, p.Connected, p.ReconnectDeadline, p.Loadout);
+        p.Ready, p.Connected, p.ReconnectDeadline, p.Loadout, p.Accepted);
     private static MatchSummary Summary(OnlineMatch m) => new(m.Id, m.Status, m.Settings, m.Players.Select(Player).ToList(),
         m.CreatedAt, m.StartedAt, m.FinishedAt, m.Result);
     private static double Elapsed(OnlineMatch m, DateTime now) => m.ClockStartedAt is null ? 0 : Math.Max(0, (now - m.ClockStartedAt.Value).TotalMilliseconds);
@@ -32,7 +32,8 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ar
             m.Board.Select(p => new PieceSnapshot(p.Id, p.Kind, p.Team, p.Square, p.HasMoved, p.Forward)).ToList(),
             m.Aram is null ? fen : null, fen.Split(' ')[2], m.EnPassantTarget, m.HalfMoveClock, m.FullMoveNumber,
             new(Math.Max(0, white), Math.Max(0, black), m.ClockStartedAt is not null && m.Status == "InProgress" ? m.Turn : null, now),
-            m.Players.Select(Player).ToList(), m.ReadyDeadline, m.DrawOffer, custom, m.Result, m.RematchId);
+            m.Players.Select(Player).ToList(), m.ReadyDeadline, m.DrawOffer, custom, m.Result, m.RematchId, m.AcceptDeadline,
+            m.CaptureHistoryVersion == 1 ? m.Captures.ToList() : null);
     }
     private GameSettings ValidateSettings(GameSettings settings)
     {
@@ -164,14 +165,16 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ar
     {
         if (ids.Count != 2 || ids.Distinct().Count() != 2) throw new OnlineException("InvalidParticipants");
         var ordered = RandomNumberGenerator.GetInt32(2) == 0 ? ids : ids.AsEnumerable().Reverse().ToList();
-        var m = new OnlineMatch { Settings = settings, Rated = rated, CreatedAt = now, ReadyDeadline = now.AddSeconds(config.ReadySeconds),
+        var m = new OnlineMatch { CaptureHistoryVersion = 1, Settings = settings, Rated = rated, CreatedAt = now,
+            AcceptDeadline = rated ? now.AddSeconds(config.AcceptSeconds) : null,
+            ReadyDeadline = now.AddSeconds(config.ReadySeconds + (rated ? config.AcceptSeconds : 0)),
             WhiteMilliseconds = settings.InitialSeconds * 1000.0, BlackMilliseconds = settings.InitialSeconds * 1000.0 };
         foreach (var id in ordered)
         {
             var user = await UserAsync(s, id, ct);
             bool connected = await store.Connections.Find(s, x => x.UserId == id && x.ExpiresAt > now).AnyAsync(ct);
             m.Players.Add(new MatchPlayer { UserId = id, Username = user.Username, DisplayName = user.Profile.DisplayName,
-                Color = m.Players.Count == 0 ? "White" : "Black", Rating = user.Stats.Elo, Connected = connected, Loadout = await Loadout(s, user, ct) });
+                Color = m.Players.Count == 0 ? "White" : "Black", Rating = user.Stats.Elo, Connected = connected, Accepted = !rated, Loadout = await Loadout(s, user, ct) });
             await store.Seats.ReplaceOneAsync(s, x => x.UserId == id, new OnlineSeat { UserId = id, Kind = "Match", ReferenceId = m.Id },
                 new ReplaceOptions { IsUpsert = true }, ct);
         }
@@ -192,6 +195,11 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ar
     private async Task StartIfReady(IClientSessionHandle s, OnlineMatch m, DateTime now, CancellationToken ct)
     {
         if (m.Status != "AwaitingReady") return;
+        if (m.AcceptDeadline is not null)
+        {
+            if (now >= m.AcceptDeadline.Value) await Cancel(s, m, "AcceptanceTimeout", now, ct);
+            return;
+        }
         if (ReadyExpired(m, now)) { await Cancel(s, m, "ReadyTimeout", now, ct); return; }
         if (!m.Players.All(p => p.Ready && p.Connected) || !aram.SetupDone(m)) return;
         // Revalidate against current inventory and then freeze this loadout for the lifetime of the match.
@@ -272,6 +280,11 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ar
         if (!Active(m)) return;
         if (m.Status == "AwaitingReady")
         {
+            if (m.AcceptDeadline is not null)
+            {
+                if (now >= m.AcceptDeadline.Value) await Cancel(s, m, "AcceptanceTimeout", now, ct);
+                return;
+            }
             // Expiration takes precedence over formation fallback, including delayed sweeps/recovery.
             if (ReadyExpired(m, now)) { await Cancel(s, m, "ReadyTimeout", now, ct); return; }
             if (aram.Tick(m, now))

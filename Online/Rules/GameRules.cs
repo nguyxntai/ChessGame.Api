@@ -59,10 +59,19 @@ public sealed class GameRules(AramEngine aram)
         else
         {
             if (!ClassicRules.TryApply(Read(match), move, out var result)) throw new OnlineException("InvalidMove");
+            // Classic removals are captures, including en passant; promotion retains the mover ID.
+            foreach (var victim in match.Board.Where(p => p.Team != team))
+                if (result.State.Board.GetPiece(Square(victim.Square)).Id != victim.Id) RecordCapture(match, team, victim);
             Write(match, result.State);
             RecordPosition(match);
         }
         match.DrawOffer = null;
+    }
+    public static void RecordCapture(OnlineMatch match, string capturer, OnlinePiece victim)
+    {
+        if (victim.Team == capturer) return;
+        match.Captures.Add(new CapturedPiece { PieceId = victim.Id, Kind = victim.Kind,
+            Team = victim.Team, CapturedBy = capturer });
     }
     public void ApplyAbility(OnlineMatch match, string team, AbilityCommand command, DateTime now)
     {

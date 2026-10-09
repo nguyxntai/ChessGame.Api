@@ -38,9 +38,7 @@ Các buff và kỹ năng ARAM được chuyển từ `AramBuffDefinition.cs`, `A
 `AramBuffRuntime.Extended.cs`, `AramBuffRuntime.Rifle.cs` và `ChessGame.Aram.cs` của Unity.
 ARAM v2 dùng 26 buff của chế độ local hiện tại; giao thức online cũ của Unity chỉ dùng 6 buff.
 
-**Unity chưa được sửa trong lần triển khai backend này.** `BackendWebSocketClient` hiện tại dùng
-giao thức WebSocket của backend cũ, nên không thể gọi trực tiếp SignalR mới.
-Unity cần một transport SignalR, DTO mới và presenter áp dụng snapshot thay cho tự xử lý online.
+Unity hiện đã dùng OnlineRestService, OnlineSession và SignalRGameTransport cho .NET; transport WebSocket cũ đã được loại bỏ. Luồng menu mới được mô tả ở mục Online menu update và tài liệu Unity liên kết bên dưới.
 Swagger dùng để kiểm tra REST; các hub method cần client SignalR để gọi thủ công.
 
 Không tạo/chạy test tự động, không chạy server, không gọi API hay ghi dữ liệu MongoDB để kiểm thử.
@@ -83,6 +81,7 @@ Các khóa cấu hình tùy chọn dưới section `Online` (hoặc biến môi 
 | --- | ---: |
 | ProtocolVersion | 1 |
 | QueueSeconds | 180 |
+| AcceptSeconds | 30 |
 | ReadySeconds | 180 |
 | ReconnectSeconds | 60 |
 | DrawOfferSeconds | 30 |
@@ -95,7 +94,7 @@ Các khóa cấu hình tùy chọn dưới section `Online` (hoặc biến môi 
 
 Ticket: `Queued -> Matched / Cancelled / Expired`.
 Match: `AwaitingReady -> InProgress -> Finished`; `Cancelled` chỉ áp dụng trước khi bắt đầu.
-Không bật bước chấp nhận riêng: `AcceptMatch` trả snapshot; `DeclineMatch` hủy trận chưa bắt đầu.
+Matchmaking có bước Accept riêng: snapshot `acceptDeadline` khác null trong 30 giây và mỗi player có `accepted`. Cả hai gọi `AcceptMatch` trước deadline thì BE xóa `acceptDeadline`, phát `MatchAccepted` và bắt đầu cửa sổ Ready/setup. Một người từ chối hoặc hết hạn sẽ hủy trận, nhả cả hai seat và trả `Cancelled` với lý do `PlayerDeclined` hoặc `AcceptanceTimeout`. Phòng riêng và rematch bỏ qua bước Accept. `AcceptMatch`/`DeclineMatch` có thể gọi lại sau timeout để nhận snapshot Cancelled mà không rollback việc nhả seat.
 Phòng: `Open -> Started / Closed`. Phòng có tối đa hai thành viên; chủ rời phòng thì chuyển chủ cho
 người còn lại, hết thành viên thì đóng. Phòng đã start không bị đóng/rời bằng API phòng.
 
@@ -104,7 +103,7 @@ người còn lại, hết thành viên thì đóng. Phòng đã start không b�
 Nếu pairing thắng cuộc đua cancel, DELETE ticket trả `Matched` kèm `matchId`; client có thể
 `DeclineMatch` nếu trận vẫn `AwaitingReady`.
 
-Match start yêu cầu cả hai `SetReady`, cả hai có kết nối hub và ARAM hoàn tất setup nếu áp dụng.
+Matchmaking phải được cả hai Accept trước khi `SetReady` hay gửi command setup. Match start yêu cầu cả hai `SetReady`, cả hai có kết nối hub và ARAM hoàn tất setup nếu áp dụng.
 Loadout được kiểm tra quyền sở hữu/type/item còn active tại lúc tạo và start; sau start lưu snapshot,
 nên việc equip khác về sau không đổi trang bị trong trận đang chơi.
 
@@ -141,6 +140,7 @@ Không nhận userId, MMR, màu, clock, kết quả hay phần thưởng do clie
 | GET `/api/matches/{matchId}/moves?page=1&pageSize=20&afterSequence=0` | Lịch sử move/ability |
 | GET `/api/users/me/matches?page=1&pageSize=20` | Trận Finished/Cancelled của tài khoản |
 | GET `/api/matches/{matchId}/result` | Kết quả chính thức; chưa có thì `ResultNotReady` |
+| GET `/api/rooms?page=1&pageSize=20&mode=Classic&region=VN` | Danh sách phòng Open chưa hết hạn; filter mode/region tùy chọn; page >= 1, pageSize 1..50. Trả Page gồm roomId, code, settings, memberCount, capacity=2, expiresAt; phòng đủ người vẫn được liệt kê |
 | POST `/api/rooms` | Tạo phòng; body gồm `requestId`, `settings` |
 | POST `/api/rooms/join` | Body `{"code":"ABCDEF12"}` |
 | GET `/api/rooms/{roomId}` | Phòng của thành viên |
@@ -174,7 +174,7 @@ dùng lại requestId đó để tạo với B bị `RequestIdConflict`.
 Phòng cũ thiếu fingerprint được phục hồi từ event `RoomUpdated` đầu tiên của phòng rồi lưu lại.
 Nếu không xác định được request tạo phòng gốc, trả `RoomCreationRequestUnavailable` (409).
 Muốn tạo lượt queue/phòng mới sau khi terminal, dùng requestId mới.
-Pagination: page 1–100000, pageSize 1–100; thứ tự move tăng theo sequence.
+Pagination lịch sử/moves: page 1–100000, pageSize 1–100; thứ tự move tăng theo sequence. Danh sách phòng: page 1–10000, pageSize 1–50.
 
 ## SignalR `/hubs/game`
 
@@ -218,7 +218,7 @@ Reused ID với payload/version khác trả `CommandIdConflict`. Nếu bị stal
 Rejection hợp lệ được lưu ack và gửi `CommandRejected` riêng cho người gửi; malformed/auth errors là HubException.
 REST domain errors có `{code,message,stateVersion}`; lỗi JWT/model-binding của framework vẫn dùng phản hồi ASP.NET.
 
-Events: `QueueStatusChanged`, `MatchFound`, `MatchCancelled`, `PlayerReadyChanged`, `MatchStarted`,
+Events: `QueueStatusChanged`, `MatchFound`, `MatchCancelled`, `MatchAccepted`, `PlayerReadyChanged`, `MatchStarted`,
 `GameStateUpdated`, `CommandRejected`, `DrawOffered`, `DrawResolved`, `PlayerConnectionChanged`,
 `MatchEnded`, `RematchRequested`, `RematchResolved`, `RoomUpdated`, `RoomClosed`.
 Envelope: `{eventId,type,matchId,sequence,stateVersion,serverTime,payload}`.
@@ -346,7 +346,7 @@ Mức thưởng cho trận đủ điều kiện dùng `MatchRewardPolicy.Calcula
 
 1. Chạy API với replica set; login hai tài khoản có inventory hợp lệ, kết nối hub bằng hai JWT.
 2. Queue cùng settings: kiểm tra hai ticket cùng matchId, màu khác nhau, current match giống nhau.
-3. SetReady hai phía: kiểm tra MatchStarted và clocks; gửi nước đúng/sai lượt, nước trái luật, version cũ.
+3. Matchmaking: AcceptMatch hai phía trước 30 giây rồi SetReady; phòng riêng: SetReady hai phía: kiểm tra MatchStarted và clocks; gửi nước đúng/sai lượt, nước trái luật, version cũ.
 4. Retry đúng commandId/payload: board/version không đổi lần hai; payload khác bị CommandIdConflict.
 5. Race cancel/pair và room start/queue: không có hai active seat hoặc match mồ côi.
 6. Tài khoản thứ ba gọi state/moves/result/hub: Forbidden; không nhận event trận riêng.
@@ -368,3 +368,55 @@ Mức thưởng cho trận đủ điều kiện dùng `MatchRewardPolicy.Calcula
     deploy đúng vùng trống 3x3 và kiểm tra promotion ở hàng cuối.
 17. Formation hết hạn nhưng ready/setup chưa hết: fallback vẫn có thể bắt đầu trận.
     Worker/recovery xử lý tại hoặc sau ready/setup deadline: chỉ MatchCancelled, không MatchStarted.
+
+## Online menu update (06/10/2026)
+
+Unity now uses the centralized REST/SignalR services documented in
+`D:/Stuurdy/Chesss-but-Weird/Documentation/OnlineDotNetIntegration.md`.
+The historical Unity migration note above describes the initial backend rollout;
+the legacy WebSocket backend has since been removed from this Unity checkout.
+
+- Online opens Rooms and Matchmaking as separate choices.
+- Rooms opens Create Room or Find Room. Creation immediately returns a shareable code.
+- Find Room lists real open rooms with pagination and an input to join by code.
+- Matchmaking opens the equipment/loadout screen. Play creates an idempotent ticket.
+- Finding opponent shows elapsed search time and supports cancellation.
+- MatchFound includes `acceptDeadline` and `players[].accepted`. The client must keep
+  board loading and gameplay behind this gate. Accepting alone does not start the game.
+- Each Accept emits `MatchAccepted` with a full versioned snapshot. The second Accept
+  clears `acceptDeadline` and resets the separate 180-second Ready/setup deadline.
+- The client loads the board and automatically calls SetReady when loading completes.
+  ARAM still requires its draft/formation steps before the clock starts.
+- The worker enforces acceptance expiry even when neither client responds. Expiration
+  and DeclineMatch cancel the whole match and free both seats; no automatic requeue.
+- UI returns to loadout after failure. A new Play generates a new requestId.
+
+Manual checks: browse and join by row/code; full, expired and closed rooms; both Accept;
+only one Accept; neither Accept; Decline; cancellation versus pairing; disconnect/reconnect
+while waiting; fresh Play after failure; room starts; ARAM setup; equipped skin/board.
+Only source compilation was performed for this change; no server/API/database calls or
+live two-client gameplay checks were run.
+## Captured prisoner presentation (October 2026)
+
+New match snapshots include `captures`: an authoritative, cumulative array of
+`{ pieceId, kind, team, capturedBy }`. `kind` and `team` describe the victim at
+capture time; `capturedBy` is White or Black. Group by capturedBy and kind to
+render one prisoner model plus xN per kind in six arena pads. The list is saved
+with the match and included in REST state, subscription and game events, so
+repeated snapshots/reconnects do not duplicate prisoners.
+
+Classic includes normal and en-passant captures. ARAM includes direct enemy
+captures, Sniper and successful FireRifle hits. Allied sacrifices, recruited
+pieces, infections, explosions, mines, pawn boarding and board collapse are
+removals rather than captures and do not add prisoners. Legal-move simulations
+never add entries to the actual match.
+
+Matches created before this field was introduced return `captures: null`;
+Classic clients may restore history from the move log, while ARAM clients must
+not guess captures from disappeared models. New matches return [] initially.
+Deploy the updated API before validating ARAM prisoners in Unity.
+
+Clocks already exist: `clocks.whiteMilliseconds`, `blackMilliseconds`,
+`runningColor` and `serverTime`. Values are server-adjusted remaining time;
+the client renders a countdown between snapshots. The server alone decides
+timeouts and increments, and the clock continues during local pause.

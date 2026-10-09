@@ -41,6 +41,7 @@ public sealed partial class OnlineService
             string? error = null;
             try
             {
+                if (m.AcceptDeadline is not null) throw new OnlineException("MatchAcceptancePending");
                 bool setup = kind == "Ability" && m.Status == "AwaitingReady" && m.Aram is not null;
                 if (m.Status != "InProgress" && !setup) throw new OnlineException("MatchNotActive");
                 if (expectedVersion is not null && expectedVersion != m.StateVersion) throw new OnlineException("StateVersionMismatch");
@@ -117,7 +118,9 @@ public sealed partial class OnlineService
         {
             await UserAsync(s, userId, token); var m = await MatchAsync(s, matchId, userId, token); var now = DateTime.UtcNow;
             await Advance(s, m, now, token);
+            if (m.Status == "Cancelled") return Snapshot(m, now, userId);
             if (!Active(m)) throw new OnlineException("MatchNotActive");
+            if (m.AcceptDeadline is not null) throw new OnlineException("MatchAcceptancePending");
             var player = m.Players.Single(p => p.UserId == userId);
             if (!player.Ready)
             {
@@ -136,6 +139,7 @@ public sealed partial class OnlineService
         {
             await UserAsync(s, userId, token); var m = await MatchAsync(s, matchId, userId, token); var now = DateTime.UtcNow;
             await Advance(s, m, now, token);
+            if (m.Status == "Cancelled") return Snapshot(m, now, userId);
             if (m.Status != "AwaitingReady") throw new OnlineException("MatchNotActive");
             await Cancel(s, m, "PlayerDeclined", now, token); return Snapshot(m, now, userId);
         }, ct);

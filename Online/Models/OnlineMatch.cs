@@ -10,6 +10,8 @@ public sealed class OnlineMatch
     public string Status { get; set; } = "AwaitingReady";
     public List<MatchPlayer> Players { get; set; } = new();
     public List<OnlinePiece> Board { get; set; } = new();
+    public List<CapturedPiece> Captures { get; set; } = new();
+    public int CaptureHistoryVersion { get; set; }
     public string Turn { get; set; } = "White";
     public string EnPassantTarget { get; set; } = "-";
     public int HalfMoveClock { get; set; }
@@ -21,6 +23,7 @@ public sealed class OnlineMatch
     public DateTime? ClockStartedAt { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime ReadyDeadline { get; set; }
+    public DateTime? AcceptDeadline { get; set; }
     public DateTime? StartedAt { get; set; }
     public DateTime? FinishedAt { get; set; }
     public DrawOffer? DrawOffer { get; set; }

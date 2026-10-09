@@ -7,6 +7,8 @@ namespace ChessGame.Api.Online;
 public sealed class RoomsController(OnlineService service) : ControllerBase
 {
     private string UserId => OnlineIdentity.UserId(User);
+    [HttpGet] public async Task<IActionResult> List(CancellationToken ct, int page = 1, int pageSize = 20, string? mode = null, string? region = null) =>
+        Ok(await service.ListRooms(UserId, page, pageSize, mode, region, ct));
     [HttpPost] public async Task<IActionResult> Create(CreateRoomRequest request, CancellationToken ct) => Ok(await service.CreateRoom(UserId, request, ct));
     [HttpPost("join")] public async Task<IActionResult> Join(JoinRoomRequest request, CancellationToken ct) => Ok(await service.JoinRoom(UserId, request.Code, ct));
     [HttpGet("{roomId}")] public async Task<IActionResult> Get(string roomId, CancellationToken ct) => Ok(await service.GetRoom(UserId, roomId, ct));
