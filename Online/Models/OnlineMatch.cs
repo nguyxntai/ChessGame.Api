@@ -7,6 +7,9 @@ public sealed class OnlineMatch
     [BsonId] public string Id { get; set; } = MongoDB.Bson.ObjectId.GenerateNewId().ToString();
     public GameSettings Settings { get; set; } = new();
     public bool Rated { get; set; }
+    public MatchmakingDiagnostics? Matchmaking { get; set; }
+    public string? SettlementPairKey { get; set; }
+    public bool SettlementReviewRequired { get; set; }
     public string Status { get; set; } = "AwaitingReady";
     public List<MatchPlayer> Players { get; set; } = new();
     public List<OnlinePiece> Board { get; set; } = new();

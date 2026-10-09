@@ -12,6 +12,8 @@ public class UserMeResponse
 
     public WalletResponse Wallet { get; set; } = new();
 
+    public ChessGame.Api.Models.PlayerRatings Ratings { get; set; } = new();
+
     public PlayerStatsResponse Stats { get; set; } = new();
 
     public EquippedSkinsResponse Equipped { get; set; } = new();

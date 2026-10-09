@@ -65,7 +65,8 @@ public sealed class GameRules(AramEngine aram)
             Write(match, result.State);
             RecordPosition(match);
         }
-        match.DrawOffer = null;
+        if (match.DrawOffer is { } offer && match.Players.Single(p => p.Color == team).UserId != offer.UserId)
+            match.DrawOffer = null;
     }
     public static void RecordCapture(OnlineMatch match, string capturer, OnlinePiece victim)
     {

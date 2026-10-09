@@ -4,5 +4,5 @@ public sealed record MatchSnapshot(string MatchId, string Status, GameSettings S
     long EventSequence, DateTime ServerTime, string Turn, List<PieceSnapshot> Board, string? Fen,
     string CastlingRights, string EnPassantTarget, int HalfMoveClock, int FullMoveNumber,
     ClockSnapshot Clocks, List<PlayerSnapshot> Players, DateTime ReadyDeadline, DrawOffer? DrawOffer,
-    AramState? Aram, OfficialResult? Result, string? RematchId, DateTime? AcceptDeadline = null,
+    AramState? Aram, OfficialResult? Result, string? RematchId, bool Rated = false, DateTime? AcceptDeadline = null,
     List<CapturedPiece>? Captures = null);

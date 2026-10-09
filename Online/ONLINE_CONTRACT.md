@@ -88,7 +88,6 @@ Các khóa cấu hình tùy chọn dưới section `Online` (hoặc biến môi 
 | RoomSeconds | 1800 |
 | InitialRatingRange | 150 |
 | RatingRangePerSecond | 10 |
-| EloK | 32 |
 
 ## State machine và chính sách
 
@@ -115,6 +114,8 @@ thì bắt đầu grace; hết grace thua abandonment. Nếu hai deadline abando
 Nếu timeout và abandonment cạnh tranh, deadline xảy ra trước quyết định kết quả.
 Ready/setup deadline được kiểm tra trước formation fallback và trước mọi lần `StartIfReady`:
 worker/recovery xử lý muộn sẽ phát `MatchCancelled`, không phát `MatchStarted` cho trận đã hết hạn.
+`SetReady`/`DeclineMatch` đến sau deadline vẫn commit cancellation và giải phóng seat
+trước khi trả lỗi `MatchNotActive`.
 
 Sau restart: tải snapshot đã lưu, xử lý deadline đã hết; nếu còn chơi, đánh dấu offline và cho
 grace reconnect (không kéo dài deadline reconnect đã có). Lệnh, lịch sử, outbox và kết quả vẫn ở DB.
@@ -123,6 +124,10 @@ Classic: chiếu hết, stalemate, các vị trí thiếu quân cơ bản, 5 l�
 3 lần lặp/50 nước dùng `ClaimDraw` cho trạng thái hiện tại. Không hỗ trợ claim theo nước dự định.
 ARAM: không áp dụng draw claim/lặp/FEN; luật buff có thể tạo hoặc hủy quân và chiếu hết khác Classic.
 FEN là `null` trong ARAM; client phải dùng board + toàn bộ `aram`.
+
+Draw offer giữ nguyên khi người đề nghị tự đi nước; nước hợp lệ của đối thủ từ chối offer.
+Không tự nhận offer của mình. Offer online có TTL `DrawOfferSeconds` (mặc định 30 giây),
+là policy của game, không mô tả như quy tắc thời hạn FIDE.
 
 ## REST
 
@@ -165,8 +170,8 @@ Ví dụ queue hoặc create room:
 ```
 
 Mode nhận `Classic` hoặc `Aram`; initial 60–7200 giây, increment 0–60 giây.
-MMR lấy từ `users.stats.elo`. Pair khi settings khớp và chênh lệch Elo nằm trong range của cả hai;
-range mở rộng theo thời gian queue. Queue/reward không dựa vào rank client gửi.
+MMR lấy từ `users.ratings.classic.rating` hoặc `users.ratings.aram.rating` theo mode. Pair khi settings khớp và chênh lệch Elo nằm trong range của cả hai;
+range từ 100 mở thêm 2 điểm/giây, tối đa 300. Queue/reward không dựa vào rank client gửi.
 `requestId` lặp với cùng payload trả lại ticket/phòng cũ, payload khác trả `RequestIdConflict`.
 Phòng lưu `CreationFingerprint` từ settings đã chuẩn hóa của request tạo phòng. Đổi settings
 không thay fingerprint: tạo với A, đổi sang B, retry request A trả phòng cũ với settings B;
@@ -325,15 +330,15 @@ không tham gia simulation; bàn và hitbox quân là hình học gameplay có t
 
 ## Kết quả, Elo và thưởng
 
-Finish lưu result, tăng stats, đổi Elo, cộng wallet và ghi currency ledger trong cùng transaction.
+Finish lưu result và quyết định eligibility, cập nhật stats/rating/wallet/ledger đủ điều kiện trong cùng transaction.
 Status Finished + index ledger `(userId,requestId,entryIndex)` chống áp dụng lần hai.
 Không có endpoint nhận victory/result từ client.
-Matchmaking tính Elo theo K=32 với rating server; phòng riêng/rematch không đổi Elo.
+Matchmaking dùng policy riêng `classic-elo-v1` hoặc `aram-glicko2-v1`; phòng riêng/rematch không đổi rating.
 **Chỉ trận matchmaking rated nhận thưởng wallet.** Phòng riêng và mọi trận tái đấu đều
 `Rated=false`: Golds/Diamonds/Tickets trong result bằng 0, không cộng wallet hoặc ghi ledger thưởng,
-kể cả chơi đủ thời gian/số nước. Kết quả và thống kê thắng/hòa/thua vẫn được lưu.
-Đây là chính sách theo nguồn tạo trận, không dựa vào thời lượng hay số nước; điều kiện và mức thưởng
-của matchmaking rated giữ nguyên. Backend tự đặt Rated, client không quyết định điều kiện thưởng.
+kể cả chơi đủ thời gian/số nước. Kết quả vẫn lưu; thống kê thắng/hòa/thua chỉ cộng nếu cả hai đã có Move hợp lệ.
+Backend tự đặt Rated. Rating cần nước hợp lệ của cả hai và vượt điều kiện chống farm/review.
+Wallet cần thêm ≥5 Move mỗi bên và ≥60 giây; bỏ trận không nhận wallet.
 Mức thưởng cho trận đủ điều kiện dùng `MatchRewardPolicy.CalculateNetworkReward` hiện có của Unity:
 
 | Kết quả | Golds | Diamonds | Tickets |
