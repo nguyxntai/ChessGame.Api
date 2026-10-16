@@ -142,6 +142,7 @@ builder.Services.AddScoped<LeaderboardService>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<InventoryService>();
 builder.Services.AddScoped<GachaService>();
+builder.Services.AddScoped<WalletService>();
 builder.Services.AddScoped<JwtService>();
 builder.Services.AddScoped<RefreshTokenService>();
 
@@ -241,6 +242,7 @@ using (var scope = app.Services.CreateScope())
     await inventoryService.EnsureIndexesAsync();
     await refreshTokenService.EnsureIndexesAsync();
     await scope.ServiceProvider.GetRequiredService<GachaService>().EnsureIndexesAsync();
+    await scope.ServiceProvider.GetRequiredService<WalletService>().EnsureIndexesAsync();
     await scope.ServiceProvider.GetRequiredService<OnlineStore>().EnsureIndexesAsync();
 }
 
