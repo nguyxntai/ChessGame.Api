@@ -1,12 +1,10 @@
-using System.Security.Cryptography;
-using System.Text;
 using ChessGame.Api.Models;
 
 namespace ChessGame.Api.Online;
 
 public static class MatchmakingPolicy
 {
-    public static string PoolKey(GameSettings settings) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(OnlineJson.Write(settings))));
+    public static string PoolKey(GameSettings settings) => ModeNormalization.SettingsFingerprint(settings);
     public static int Range(OnlineTicket ticket, DateTime now, OnlineOptions options) =>
         (int)Math.Min(options.MaximumRatingRange, options.InitialRatingRange +
             Math.Max(0, (now - ticket.CreatedAt).TotalSeconds) * options.RatingRangePerSecond);

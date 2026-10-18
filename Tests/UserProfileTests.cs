@@ -13,6 +13,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
 using MongoDB.Bson;
 using MongoDB.Bson.Serialization;
@@ -217,6 +218,9 @@ public sealed class UserProfileTests
             var builder = WebApplication.CreateBuilder();
             builder.WebHost.UseTestServer();
             builder.Services.AddControllers().AddApplicationPart(typeof(UsersController).Assembly);
+            builder.Configuration.AddJsonFile(Path.Combine(AppContext.BaseDirectory, "ranks.json"), optional: false);
+            builder.Services.Configure<ChessGame.Api.Services.Ranks.RankOptions>(builder.Configuration.GetSection("Ranks"));
+            builder.Services.AddSingleton<ChessGame.Api.Services.Ranks.RankService>();
             builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options =>
                 options.TokenValidationParameters = new TokenValidationParameters
                 {

@@ -2,12 +2,12 @@ namespace ChessButWeird.Domain
 {
     public interface IBuffContextProvider
     {
-        AramPieceContext GetContext(PieceState piece);
+        ChaosPieceContext GetContext(PieceState piece);
     }
 
     public readonly struct NoBuffs : IBuffContextProvider
     {
-        public AramPieceContext GetContext(PieceState piece) => default;
+        public ChaosPieceContext GetContext(PieceState piece) => default;
     }
 
     /// <summary>A read-only hypothetical move. No temporary writes to the live board or allocations.</summary>
@@ -44,9 +44,9 @@ namespace ChessButWeird.Domain
     {
         public static bool IsInCheck<TBoard, TBuffs>(TBoard board, Team team, TBuffs buffs)
             where TBoard : IReadOnlyBoard where TBuffs : IBuffContextProvider
-            => IsInCheck(board, team, buffs, AramRules.BuiltIn);
+            => IsInCheck(board, team, buffs, ChaosRules.BuiltIn);
 
-        public static bool IsInCheck<TBoard, TBuffs>(TBoard board, Team team, TBuffs buffs, AramRules rules)
+        public static bool IsInCheck<TBoard, TBuffs>(TBoard board, Team team, TBuffs buffs, ChaosRules rules)
             where TBoard : IReadOnlyBoard where TBuffs : IBuffContextProvider
         {
             if (rules == null) throw new System.ArgumentNullException(nameof(rules));
@@ -62,9 +62,9 @@ namespace ChessButWeird.Domain
 
         public static bool IsAttacked<TBoard, TBuffs>(TBoard board, Square square, Team attacker, TBuffs buffs)
             where TBoard : IReadOnlyBoard where TBuffs : IBuffContextProvider
-            => IsAttacked(board, square, attacker, buffs, AramRules.BuiltIn);
+            => IsAttacked(board, square, attacker, buffs, ChaosRules.BuiltIn);
 
-        public static bool IsAttacked<TBoard, TBuffs>(TBoard board, Square square, Team attacker, TBuffs buffs, AramRules rules)
+        public static bool IsAttacked<TBoard, TBuffs>(TBoard board, Square square, Team attacker, TBuffs buffs, ChaosRules rules)
             where TBoard : IReadOnlyBoard where TBuffs : IBuffContextProvider
         {
             if (rules == null) throw new System.ArgumentNullException(nameof(rules));
@@ -73,8 +73,8 @@ namespace ChessButWeird.Domain
                 Square from = new Square(x, y);
                 PieceState piece = board.GetPiece(from);
                 if (piece.IsEmpty || piece.Team != attacker) continue;
-                AramPieceContext context = buffs.GetContext(piece);
-                if ((!AramRules.SuppressesStandardMovement(context) && MovementRules.Attacks(board, piece, from, square)) ||
+                ChaosPieceContext context = buffs.GetContext(piece);
+                if ((!ChaosRules.SuppressesStandardMovement(context) && MovementRules.Attacks(board, piece, from, square)) ||
                     rules.Allows(board, piece, from, square, context, attack: true)) return true;
             }
             return false;

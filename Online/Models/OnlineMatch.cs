@@ -2,6 +2,7 @@ using MongoDB.Bson.Serialization.Attributes;
 
 namespace ChessGame.Api.Online;
 
+[BsonSerializer(typeof(ChaosDocumentSerializer<OnlineMatch>))]
 public sealed class OnlineMatch
 {
     [BsonId] public string Id { get; set; } = MongoDB.Bson.ObjectId.GenerateNewId().ToString();
@@ -31,7 +32,7 @@ public sealed class OnlineMatch
     public DateTime? FinishedAt { get; set; }
     public DrawOffer? DrawOffer { get; set; }
     public OfficialResult? Result { get; set; }
-    public AramState? Aram { get; set; }
+    [BsonElement("chaos")] public ChaosState? Chaos { get; set; }
     public Dictionary<string, int> Repetitions { get; set; } = new();
     public List<string> RematchRequests { get; set; } = new();
     public string? RematchId { get; set; }

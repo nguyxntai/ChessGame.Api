@@ -42,7 +42,7 @@ public sealed partial class OnlineService
             try
             {
                 if (m.AcceptDeadline is not null) throw new OnlineException("MatchAcceptancePending");
-                bool setup = kind == "Ability" && m.Status == "AwaitingReady" && m.Aram is not null;
+                bool setup = kind == "Ability" && m.Status == "AwaitingReady" && m.Chaos is not null;
                 if (m.Status != "InProgress" && !setup) throw new OnlineException("MatchNotActive");
                 if (expectedVersion is not null && expectedVersion != m.StateVersion) throw new OnlineException("StateVersionMismatch");
                 if (expectedVersion < 0) throw new OnlineException("StateVersionMismatch");

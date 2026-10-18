@@ -11,6 +11,7 @@ public static class OnlineJson
     public static object? EventPayload(OnlineEvent e, string userId)
     {
         var node = JsonNode.Parse(e.PayloadJson);
+        ModeNormalization.NormalizePayload(node);
         Redact(node, userId);
         return node;
     }
@@ -18,7 +19,7 @@ public static class OnlineJson
     {
         if (node is JsonObject obj)
         {
-            if (obj["players"] is JsonArray players && obj["aram"] is JsonObject aram && aram["sides"] is JsonArray sides)
+            if (obj["players"] is JsonArray players && obj["chaos"] is JsonObject chaos && chaos["sides"] is JsonArray sides)
             {
                 var color = players.OfType<JsonObject>().FirstOrDefault(p => (string?)p["userId"] == userId)?["color"]?.GetValue<string>();
                 foreach (var side in sides.OfType<JsonObject>())

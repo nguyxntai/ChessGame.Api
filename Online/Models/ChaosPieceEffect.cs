@@ -1,6 +1,6 @@
 namespace ChessGame.Api.Online;
 
-public sealed class AramPieceEffect
+public sealed class ChaosPieceEffect
 {
     public int PieceId { get; set; }
     public bool Bloodthirsty { get; set; }

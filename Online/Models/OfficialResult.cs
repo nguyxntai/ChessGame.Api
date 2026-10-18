@@ -5,7 +5,8 @@ public sealed class OfficialResult
     public string Outcome { get; set; } = "Draw";
     public string? WinnerId { get; set; }
     public string Reason { get; set; } = "";
-    public string RatingMode { get; set; } = "";
+    private string ratingMode = "";
+    public string RatingMode { get => ratingMode; set => ratingMode = ModeNormalization.Normalize(value); }
     public string RatingPolicy { get; set; } = "";
     public bool RatingApplied { get; set; }
     public bool RewardsApplied { get; set; }

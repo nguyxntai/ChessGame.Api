@@ -1,6 +1,9 @@
 # Online .NET — hợp đồng và kiểm tra thủ công
 
-Ngày triển khai: 03/10/2026. Protocol REST/SignalR: `1`; luật ARAM: `2`.
+Ngày triển khai: 03/10/2026; cập nhật rank/Chaos: 18/10/2026. Protocol REST/SignalR: `1`; luật Chaos: `2`.
+
+Rank, JSON mẫu, migration và checklist mới: [Rank và chuyển đổi Chaos](../Documentation/ranks-and-chaos.md).
+Phải hoàn tất migration offline trước khi chạy bản backend này trên dữ liệu cũ.
 
 ## Phạm vi và nguồn luật
 
@@ -14,10 +17,10 @@ tiếp tục dùng các service và collection hiện có. Không seed dữ li�
 | --- | --- |
 | `DTOs/` | Request, response, command, snapshot và event; mỗi DTO một file |
 | `Controllers/` | MatchmakingController, MatchesController và RoomsController; mỗi controller một file |
-| `Models/` | Document MongoDB và model trạng thái trận/ARAM; mỗi model một file |
+| `Models/` | Document MongoDB và model trạng thái trận/CHAOS; mỗi model một file |
 | `Services/` | OnlineService cùng các phần partial Commands, Lobby, Presence và LiveConnections |
 | `Hubs/` | GameHub cho SignalR |
-| `Rules/` | GameRules và AramEngine |
+| `Rules/` | GameRules và ChaosEngine |
 | `Domain/` | Engine cờ thuần C# |
 | `Infrastructure/` | OnlineStore và OnlineRuntimeLease: MongoDB, transaction, index, lease |
 | `Workers/` | OnlineWorker xử lý deadline, recovery và outbox |
@@ -34,9 +37,10 @@ trong `Services` vẫn là các phần của cùng một class `OnlineService`.
 
 Engine Classic trong `Online/Domain` được lấy từ
 `D:/Stuurdy/Chesss-but-Weird/Packages/com.chessbutweird.domain/Runtime`.
-Các buff và kỹ năng ARAM được chuyển từ `AramBuffDefinition.cs`, `AramBuffRuntime.cs`,
-`AramBuffRuntime.Extended.cs`, `AramBuffRuntime.Rifle.cs` và `ChessGame.Aram.cs` của Unity.
-ARAM v2 dùng 26 buff của chế độ local hiện tại; giao thức online cũ của Unity chỉ dùng 6 buff.
+Các buff và kỹ năng Chaos giữ nguyên từ nguồn Unity hiện có. Các tên nguồn tham chiếu
+`AramBuffDefinition.cs`, `AramBuffRuntime.cs`, `AramBuffRuntime.Extended.cs`,
+`AramBuffRuntime.Rifle.cs` và `ChessGame.Aram.cs` là tên legacy của Unity; phiên này không sửa Unity.
+CHAOS v2 dùng 26 buff của chế độ local hiện tại; giao thức online cũ của Unity chỉ dùng 6 buff.
 
 Unity hiện đã dùng OnlineRestService, OnlineSession và SignalRGameTransport cho .NET; transport WebSocket cũ đã được loại bỏ. Luồng menu mới được mô tả ở mục Online menu update và tài liệu Unity liên kết bên dưới.
 Swagger dùng để kiểm tra REST; các hub method cần client SignalR để gọi thủ công.
@@ -52,7 +56,8 @@ reconnect hay tính đúng của từng buff trong môi trường chạy thật.
 - Chạy một instance API xử lý online. Lease `online_leases/runtime` chỉ cho một instance sở hữu online;
   instance mới vẫn mở HTTP và chờ lease ở background, không làm startup crash.
   Cần backplane SignalR và thiết kế phân phối presence/ownership trước khi mở rộng nhiều instance.
-- Startup tạo các index `online_*` và index ledger thưởng; không thay đổi schema các collection cũ.
+- Startup kiểm tra schema Chaos đã chuyển đổi, khởi tạo rating cho account chưa có ratings và tạo index.
+  Startup không tự chuyển đổi Aram; xem migration offline trong tài liệu rank.
 - Worker giữ lease 15 giây và renew mỗi 3 giây. Khi mất lease, instance dừng để bảo toàn quyền xử lý.
 - Sau khi lấy lease, worker renew trong lúc recovery; chỉ mở API online khi recovery hoàn tất.
   Trong lúc chờ/recovery, API online trả `503 OnlineTemporarilyUnavailable`; SignalR cần kết nối lại.
@@ -102,7 +107,7 @@ người còn lại, hết thành viên thì đóng. Phòng đã start không b�
 Nếu pairing thắng cuộc đua cancel, DELETE ticket trả `Matched` kèm `matchId`; client có thể
 `DeclineMatch` nếu trận vẫn `AwaitingReady`.
 
-Matchmaking phải được cả hai Accept trước khi `SetReady` hay gửi command setup. Match start yêu cầu cả hai `SetReady`, cả hai có kết nối hub và ARAM hoàn tất setup nếu áp dụng.
+Matchmaking phải được cả hai Accept trước khi `SetReady` hay gửi command setup. Match start yêu cầu cả hai `SetReady`, cả hai có kết nối hub và CHAOS hoàn tất setup nếu áp dụng.
 Loadout được kiểm tra quyền sở hữu/type/item còn active tại lúc tạo và start; sau start lưu snapshot,
 nên việc equip khác về sau không đổi trang bị trong trận đang chơi.
 
@@ -122,8 +127,8 @@ grace reconnect (không kéo dài deadline reconnect đã có). Lệnh, lịch s
 
 Classic: chiếu hết, stalemate, các vị trí thiếu quân cơ bản, 5 lần lặp/75 nước tự hòa;
 3 lần lặp/50 nước dùng `ClaimDraw` cho trạng thái hiện tại. Không hỗ trợ claim theo nước dự định.
-ARAM: không áp dụng draw claim/lặp/FEN; luật buff có thể tạo hoặc hủy quân và chiếu hết khác Classic.
-FEN là `null` trong ARAM; client phải dùng board + toàn bộ `aram`.
+CHAOS: không áp dụng draw claim/lặp/FEN; luật buff có thể tạo hoặc hủy quân và chiếu hết khác Classic.
+FEN là `null` trong CHAOS; client phải dùng board + toàn bộ `chaos`.
 
 Draw offer giữ nguyên khi người đề nghị tự đi nước; nước hợp lệ của đối thủ từ chối offer.
 Không tự nhận offer của mình. Offer online có TTL `DrawOfferSeconds` (mặc định 30 giây),
@@ -169,10 +174,13 @@ Ví dụ queue hoặc create room:
 }
 ```
 
-Mode nhận `Classic` hoặc `Aram`; initial 60–7200 giây, increment 0–60 giây.
-MMR lấy từ `users.ratings.classic.rating` hoặc `users.ratings.aram.rating` theo mode. Pair khi settings khớp và chênh lệch Elo nằm trong range của cả hai;
+Mode chuẩn nhận/trả `Classic` hoặc `Chaos`; đầu vào `Aram`/`ARAM` tạm là alias của `Chaos`,
+chuẩn hóa trước validation/so sánh/hash và chỉ ghi/trả Chaos. Initial 60–7200 giây, increment 0–60 giây.
+MMR lấy từ `users.ratings.classic.rating` hoặc `users.ratings.chaos.rating` theo mode. Pair khi settings khớp và chênh lệch Elo nằm trong range của cả hai;
 range từ 100 mở thêm 2 điểm/giây, tối đa 300. Queue/reward không dựa vào rank client gửi.
 `requestId` lặp với cùng payload trả lại ticket/phòng cũ, payload khác trả `RequestIdConflict`.
+Hash tạo phòng legacy được giữ nguyên và được so sánh với cả hash chuẩn lẫn hash Aram cũ;
+đổi alias không làm retry hợp lệ bị conflict. Migration chuẩn hóa ticket và tính lại pool key.
 Phòng lưu `CreationFingerprint` từ settings đã chuẩn hóa của request tạo phòng. Đổi settings
 không thay fingerprint: tạo với A, đổi sang B, retry request A trả phòng cũ với settings B;
 dùng lại requestId đó để tạo với B bị `RequestIdConflict`.
@@ -235,7 +243,7 @@ Rematch cần đồng ý hai phía trong 2 phút; dùng loadout mới, không t�
 ### Snapshot và reconnect không mất event
 
 Snapshot có board (ID quân ổn định, kind/team/square/hasMoved/forward), turn, quyền nhập thành/en passant,
-clocks/serverTime, stateVersion, eventSequence, ready/presence/loadout, draw offer, result và ARAM.
+clocks/serverTime, stateVersion, eventSequence, ready/presence/loadout, draw offer, result và CHAOS.
 Draft options của đối phương bị ẩn; buff đã chọn và hiệu ứng gameplay công khai.
 
 1. Đăng ký callback tất cả event trước khi mở kết nối; buffer event theo matchId/sequence.
@@ -250,7 +258,7 @@ Mỗi method/read vẫn kiểm tra membership trong DB. Outbox commit cùng stat
 khi process ngắt giữa gửi và đánh dấu Published. Client deduplicate bằng eventId/sequence.
 Moves REST là lịch sử lệnh, không thay thế ReplayEvents cho readiness/presence/draw/result.
 
-## ARAM: ID buff, command và snapshot
+## CHAOS: ID buff, command và snapshot
 
 Server chọn ngẫu nhiên một tier chung cho hai người; mỗi người được ba lựa chọn khác nhau trong tier đó,
 chọn một buff. Mọi RNG/effect được tính trên server và lưu cùng command.
@@ -276,7 +284,7 @@ Trong AwaitingReady vẫn gọi UseAbility với expectedVersion để draft/set
 | 15 | SubstituteNinjutsu | Lần đầu bị chiếu: teleport King tới ô an toàn trong nửa bàn, để decoy |
 | 16 | HighTechEra | Rook gốc bắt qua đúng một blocker; mất cannon sau 10 lượt không bắn |
 | 17 | QueensBetrayal | Queen thêm ở hàng thứ ba; mỗi lượt chủ 10% đổi phía |
-| 18 | DefinitionOfAram | Round 10/15 sụp cặp file ngoài; hủy quân trên ô sụp |
+| 18 | DefinitionOfChaos | Round 10/15 sụp cặp file ngoài; hủy quân trên ô sụp |
 | 19 | RngFiesta | Đổi quân ban đầu trừ King/Queen thành P/N/B/R ngẫu nhiên |
 | 20 | IFrameRoll | Khi checkmate: `Escape` tới ô an toàn trong 5x5 quanh King, tối đa 3 lần |
 | 21 | GhostArmy | Đi xuyên quân mình, không dùng xuyên để chiếu King địch |
@@ -306,7 +314,7 @@ ví dụ một quân phía trên chỉ minh họa cấu trúc, không phải for
 Formation chưa gửi khi hết 120 giây dùng bố trí gốc, hoàn buff Gold theo luật hiện tại.
 Nếu Gold mới là Doppelganger thì vẫn cần SelectTargets trước setup deadline.
 Pending reinforcement chỉ cho chủ của deployment đầu tiên gọi Deploy; nước thường và kỹ năng khác đợi.
-Snapshot có `aram.phase`, `sides`, `deployments`, `forcedPawn`, `escapeTeam`, `mines`, `crates`,
+Snapshot có `chaos.phase`, `sides`, `deployments`, `forcedPawn`, `escapeTeam`, `mines`, `crates`,
 `collapsedFiles`, effects theo pieceId, lượt chủ/cooldown/charges, và rifle session/deadline.
 Battle tickets không liên quan wallet tickets; inventory không thay đổi vì buff chiến đấu.
 
@@ -321,7 +329,7 @@ Online dùng hệ tọa độ riêng: a1=(0,0,0), file=+X, rank=+Z, up=+Y, tile=
 Origin=(King.file,0.95,King.rank); yaw=0 nhìn +Z, yaw=90 nhìn +X; pitch dương nhìn xuống;
 pitch chỉ -80..80 độ, range 500 đơn vị, board plane y=0 chặn tia hướng xuống.
 
-Hitbox AABB canonical được snapshot trong `aram.hitboxes`: halfWidth/halfDepth=0.3;
+Hitbox AABB canonical được snapshot trong `chaos.hitboxes`: halfWidth/halfDepth=0.3;
 height King/Queen=1.2, Pawn=0.65, Rook/Bishop/Knight=0.9.
 Đây là **hợp đồng hitbox online mới**, không phải số đo đã xác nhận từ mesh/FBX đang dùng.
 Unity cần đồng bộ collider online và chuyển camera/ray từ world space sang hệ tọa độ này;
@@ -333,7 +341,7 @@ không tham gia simulation; bàn và hitbox quân là hình học gameplay có t
 Finish lưu result và quyết định eligibility, cập nhật stats/rating/wallet/ledger đủ điều kiện trong cùng transaction.
 Status Finished + index ledger `(userId,requestId,entryIndex)` chống áp dụng lần hai.
 Không có endpoint nhận victory/result từ client.
-Matchmaking dùng policy riêng `classic-elo-v1` hoặc `aram-glicko2-v1`; phòng riêng/rematch không đổi rating.
+Matchmaking dùng policy riêng `classic-elo-v1` hoặc `chaos-glicko2-v1`; phòng riêng/rematch không đổi rating.
 **Chỉ trận matchmaking rated nhận thưởng wallet.** Phòng riêng và mọi trận tái đấu đều
 `Rated=false`: Golds/Diamonds/Tickets trong result bằng 0, không cộng wallet hoặc ghi ledger thưởng,
 kể cả chơi đủ thời gian/số nước. Kết quả vẫn lưu; thống kê thắng/hòa/thua chỉ cộng nếu cả hai đã có Move hợp lệ.
@@ -391,14 +399,14 @@ the legacy WebSocket backend has since been removed from this Unity checkout.
 - Each Accept emits `MatchAccepted` with a full versioned snapshot. The second Accept
   clears `acceptDeadline` and resets the separate 180-second Ready/setup deadline.
 - The client loads the board and automatically calls SetReady when loading completes.
-  ARAM still requires its draft/formation steps before the clock starts.
+  CHAOS still requires its draft/formation steps before the clock starts.
 - The worker enforces acceptance expiry even when neither client responds. Expiration
   and DeclineMatch cancel the whole match and free both seats; no automatic requeue.
 - UI returns to loadout after failure. A new Play generates a new requestId.
 
 Manual checks: browse and join by row/code; full, expired and closed rooms; both Accept;
 only one Accept; neither Accept; Decline; cancellation versus pairing; disconnect/reconnect
-while waiting; fresh Play after failure; room starts; ARAM setup; equipped skin/board.
+while waiting; fresh Play after failure; room starts; CHAOS setup; equipped skin/board.
 Only source compilation was performed for this change; no server/API/database calls or
 live two-client gameplay checks were run.
 ## Captured prisoner presentation (October 2026)
@@ -410,16 +418,16 @@ render one prisoner model plus xN per kind in six arena pads. The list is saved
 with the match and included in REST state, subscription and game events, so
 repeated snapshots/reconnects do not duplicate prisoners.
 
-Classic includes normal and en-passant captures. ARAM includes direct enemy
+Classic includes normal and en-passant captures. CHAOS includes direct enemy
 captures, Sniper and successful FireRifle hits. Allied sacrifices, recruited
 pieces, infections, explosions, mines, pawn boarding and board collapse are
 removals rather than captures and do not add prisoners. Legal-move simulations
 never add entries to the actual match.
 
 Matches created before this field was introduced return `captures: null`;
-Classic clients may restore history from the move log, while ARAM clients must
+Classic clients may restore history from the move log, while CHAOS clients must
 not guess captures from disappeared models. New matches return [] initially.
-Deploy the updated API before validating ARAM prisoners in Unity.
+Deploy the updated API before validating CHAOS prisoners in Unity.
 
 Clocks already exist: `clocks.whiteMilliseconds`, `blackMilliseconds`,
 `runningColor` and `serverTime`. Values are server-adjusted remaining time;

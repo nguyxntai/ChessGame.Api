@@ -1,0 +1,156 @@
+{
+  "Ranks": {
+    "Version": "rank-thresholds-v1",
+    "PlacementRequired": 10,
+    "Modes": {
+      "Classic": [
+        {
+          "tierId": "Pawn",
+          "order": 1,
+          "displayName": "Sắt",
+          "minRating": 0,
+          "colorHex": "#747D8C",
+          "badgeKey": "rank_pawn"
+        },
+        {
+          "tierId": "Knight",
+          "order": 2,
+          "displayName": "Đồng",
+          "minRating": 1000,
+          "colorHex": "#B97847",
+          "badgeKey": "rank_knight"
+        },
+        {
+          "tierId": "Bishop",
+          "order": 3,
+          "displayName": "Bạc",
+          "minRating": 1200,
+          "colorHex": "#BCC9D5",
+          "badgeKey": "rank_bishop"
+        },
+        {
+          "tierId": "Rook",
+          "order": 4,
+          "displayName": "Vàng",
+          "minRating": 1400,
+          "colorHex": "#E6B541",
+          "badgeKey": "rank_rook"
+        },
+        {
+          "tierId": "Queen",
+          "order": 5,
+          "displayName": "Bạch Kim",
+          "minRating": 1600,
+          "colorHex": "#44B9B0",
+          "badgeKey": "rank_queen"
+        },
+        {
+          "tierId": "King",
+          "order": 6,
+          "displayName": "Kim Cương",
+          "minRating": 1800,
+          "colorHex": "#4B9AE8",
+          "badgeKey": "rank_king"
+        },
+        {
+          "tierId": "Grandmaster",
+          "order": 7,
+          "displayName": "Tím huyền bí",
+          "minRating": 2000,
+          "colorHex": "#9461D9",
+          "badgeKey": "rank_grandmaster"
+        },
+        {
+          "tierId": "Legend",
+          "order": 8,
+          "displayName": "Đỏ huyền thoại",
+          "minRating": 2200,
+          "colorHex": "#D95065",
+          "badgeKey": "rank_legend"
+        },
+        {
+          "tierId": "Celestial",
+          "order": 9,
+          "displayName": "Hoàng kim thiên thể",
+          "minRating": 2400,
+          "colorHex": "#F4D68A",
+          "badgeKey": "rank_celestial"
+        }
+      ],
+      "Chaos": [
+        {
+          "tierId": "Pawn",
+          "order": 1,
+          "displayName": "Sắt",
+          "minRating": 0,
+          "colorHex": "#747D8C",
+          "badgeKey": "rank_pawn"
+        },
+        {
+          "tierId": "Knight",
+          "order": 2,
+          "displayName": "Đồng",
+          "minRating": 1000,
+          "colorHex": "#B97847",
+          "badgeKey": "rank_knight"
+        },
+        {
+          "tierId": "Bishop",
+          "order": 3,
+          "displayName": "Bạc",
+          "minRating": 1200,
+          "colorHex": "#BCC9D5",
+          "badgeKey": "rank_bishop"
+        },
+        {
+          "tierId": "Rook",
+          "order": 4,
+          "displayName": "Vàng",
+          "minRating": 1400,
+          "colorHex": "#E6B541",
+          "badgeKey": "rank_rook"
+        },
+        {
+          "tierId": "Queen",
+          "order": 5,
+          "displayName": "Bạch Kim",
+          "minRating": 1600,
+          "colorHex": "#44B9B0",
+          "badgeKey": "rank_queen"
+        },
+        {
+          "tierId": "King",
+          "order": 6,
+          "displayName": "Kim Cương",
+          "minRating": 1800,
+          "colorHex": "#4B9AE8",
+          "badgeKey": "rank_king"
+        },
+        {
+          "tierId": "Grandmaster",
+          "order": 7,
+          "displayName": "Tím huyền bí",
+          "minRating": 2000,
+          "colorHex": "#9461D9",
+          "badgeKey": "rank_grandmaster"
+        },
+        {
+          "tierId": "Legend",
+          "order": 8,
+          "displayName": "Đỏ huyền thoại",
+          "minRating": 2200,
+          "colorHex": "#D95065",
+          "badgeKey": "rank_legend"
+        },
+        {
+          "tierId": "Celestial",
+          "order": 9,
+          "displayName": "Hoàng kim thiên thể",
+          "minRating": 2400,
+          "colorHex": "#F4D68A",
+          "badgeKey": "rank_celestial"
+        }
+      ]
+    }
+  }
+}

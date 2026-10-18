@@ -10,8 +10,7 @@ public sealed partial class OnlineService
         lease.RequireOwner();
         if (page < 1 || page > 10000 || pageSize < 1 || pageSize > 50)
             throw new OnlineException("InvalidPagination", 400);
-        string? selectedMode = string.IsNullOrWhiteSpace(mode) ? null : mode.Trim().ToUpperInvariant() switch
-        { "CLASSIC" => "Classic", "ARAM" => "Aram", _ => throw new OnlineException("InvalidGameMode", 400) };
+        string? selectedMode = string.IsNullOrWhiteSpace(mode) ? null : ModeNormalization.Require(mode, "InvalidGameMode");
         string? selectedRegion = string.IsNullOrWhiteSpace(region) ? null : region.Trim().ToUpperInvariant();
         if (selectedRegion is { Length: > 16 }) throw new OnlineException("InvalidRegion", 400);
         return await store.Transaction(async (s, token) =>

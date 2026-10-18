@@ -9,8 +9,19 @@ using Microsoft.Extensions.Options;
 using MongoDB.Driver;
 using Microsoft.OpenApi.Models;
 using ChessGame.Api.Online;
+using ChessGame.Api.Services.Ranks;
+using Microsoft.Extensions.Configuration.Json;
 
 var builder = WebApplication.CreateBuilder(args);
+// Lowest precedence defaults: appsettings, environment and command line can override rank thresholds.
+builder.Configuration.Sources.Insert(0, new JsonConfigurationSource
+{
+    Path = "ranks.json", FileProvider = builder.Environment.ContentRootFileProvider, Optional = false, ReloadOnChange = false
+});
+builder.Services.AddOptions<RankOptions>().Bind(builder.Configuration.GetSection("Ranks"))
+    .Validate(RankOptions.Valid, "Ranks requires a version, 10 placements, and 9 ordered tiers covering rating >= 0 for Classic and Chaos.")
+    .ValidateOnStart();
+builder.Services.AddSingleton<RankService>();
 
 // Controllers
 builder.Services.AddControllers();
@@ -32,7 +43,7 @@ builder.Services.AddOptions<OnlineOptions>()
     .ValidateOnStart();
 builder.Services.AddSingleton<OnlineRuntimeLease>();
 builder.Services.AddSingleton<OnlineStore>();
-builder.Services.AddSingleton<AramEngine>();
+builder.Services.AddSingleton<ChaosEngine>();
 builder.Services.AddSingleton<GameRules>();
 builder.Services.AddSingleton<OnlineService>();
 builder.Services.AddSingleton<LiveConnections>();
@@ -223,6 +234,9 @@ app.UseSwaggerUI(options =>
 });
 
 // Tạo MongoDB indexes
+// Validate ranks before any startup data/index writes; this gate never performs migration.
+_ = app.Services.GetRequiredService<IOptions<RankOptions>>().Value;
+await ChessGame.Api.Services.Ratings.ChaosMigrationGuard.AssertReadyAsync(app.Services.GetRequiredService<IMongoDatabase>());
 await ChessGame.Api.Services.Ratings.RatingMigration.InitializeAsync(app.Services.GetRequiredService<IMongoDatabase>());
 using (var scope = app.Services.CreateScope())
 {

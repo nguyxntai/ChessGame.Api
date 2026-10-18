@@ -1,13 +1,14 @@
 using ChessGame.Api.DTOs.Leaderboard;
 using ChessGame.Api.Models;
 using ChessGame.Api.Services.Ratings;
+using ChessGame.Api.Services.Ranks;
 using ChessGame.Api.Online;
 using MongoDB.Bson;
 using MongoDB.Driver;
 
 namespace ChessGame.Api.Services;
 
-public sealed class LeaderboardService(IMongoDatabase database, IMongoClient client)
+public sealed class LeaderboardService(IMongoDatabase database, IMongoClient client, RankService ranks)
 {
     private readonly IMongoCollection<User> users = database.GetCollection<User>("users");
     private static readonly ProjectionDefinition<User, User> PublicProjection =
@@ -20,8 +21,8 @@ public sealed class LeaderboardService(IMongoDatabase database, IMongoClient cli
     public async Task<List<LeaderboardEntry>> Top(string userId, int limit, CancellationToken ct, string mode = "Classic", bool includeProvisional = false)
     {
         if (limit is < 1 or > 100) throw new OnlineException("InvalidLimit", 400);
-        mode = mode.Trim().ToUpperInvariant() switch { "CLASSIC" => "Classic", "ARAM" => "Aram", _ => throw new OnlineException("InvalidMode", 400) };
-        var field = mode == "Classic" ? "ratings.classic.rating" : "ratings.aram.rating";
+        mode = ModeNormalization.Require(mode);
+        var field = mode == "Classic" ? "ratings.classic.rating" : "ratings.chaos.rating";
         var id = ObjectId.Parse(OnlineIdentity.Id(userId));
         if (!await users.Find(u => u.Id == id && u.IsActive).Project(u => u.Id).AnyAsync(ct))
             throw new OnlineException("Forbidden", 403);
@@ -40,8 +41,8 @@ public sealed class LeaderboardService(IMongoDatabase database, IMongoClient cli
 
     public async Task<LeaderboardEntry> Me(string userId, CancellationToken ct, string mode = "Classic", bool includeProvisional = false)
     {
-        mode = mode.Trim().ToUpperInvariant() switch { "CLASSIC" => "Classic", "ARAM" => "Aram", _ => throw new OnlineException("InvalidMode", 400) };
-        var field = mode == "Classic" ? "ratings.classic.rating" : "ratings.aram.rating";
+        mode = ModeNormalization.Require(mode);
+        var field = mode == "Classic" ? "ratings.classic.rating" : "ratings.chaos.rating";
         var id = ObjectId.Parse(OnlineIdentity.Id(userId));
         // Pin both reads to one snapshot, even if a match changes ELO between them.
         // A snapshot session avoids the write guard and commit round trip of gameplay transactions.
@@ -57,12 +58,13 @@ public sealed class LeaderboardService(IMongoDatabase database, IMongoClient cli
 
     private static FilterDefinition<User> Eligible(string mode, bool includeProvisional) =>
         Builders<User>.Filter.Eq(u => u.IsActive, true) & (includeProvisional ? Builders<User>.Filter.Empty :
-            Builders<User>.Filter.Gte(mode == "Classic" ? "ratings.classic.ratedGames" : "ratings.aram.ratedGames", 10));
+            Builders<User>.Filter.Gte(mode == "Classic" ? "ratings.classic.ratedGames" : "ratings.chaos.ratedGames", 10));
 
-    private static LeaderboardEntry Entry(User user, long? rank, string mode)
+    private LeaderboardEntry Entry(User user, long? rank, string mode)
     {
         var rating = user.Ratings.For(mode);
         return new(rank, user.Id.ToString(), user.Username, user.Profile.DisplayName, user.Profile.AvatarId,
-            RatingPolicies.Display(rating.Rating), mode, rating.RatedGames, mode == "Aram" ? rating.Deviation : null, rating.Provisional);
+            RatingPolicies.Display(rating.Rating), mode, rating.RatedGames, mode == "Chaos" ? rating.Deviation : null, rating.Provisional,
+            ranks.Profile(mode, rating, rank));
     }
 }

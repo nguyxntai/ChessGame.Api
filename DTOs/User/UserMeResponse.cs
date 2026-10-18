@@ -13,6 +13,7 @@ public class UserMeResponse
     public WalletResponse Wallet { get; set; } = new();
 
     public ChessGame.Api.Models.PlayerRatings Ratings { get; set; } = new();
+    public ChessGame.Api.Services.Ranks.PlayerRankProfiles? Ranks { get; set; }
 
     public PlayerStatsResponse Stats { get; set; } = new();
 

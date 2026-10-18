@@ -13,10 +13,12 @@ namespace ChessGame.Api.Controllers;
 public class UsersController : ControllerBase
 {
     private readonly UserService _userService;
+    private readonly ChessGame.Api.Services.Ranks.RankService _ranks;
 
-    public UsersController(UserService userService)
+    public UsersController(UserService userService, ChessGame.Api.Services.Ranks.RankService ranks)
     {
         _userService = userService;
+        _ranks = ranks;
     }
 
     /// <summary>Read the authenticated player's profile and server-owned balances/statistics.</summary>
@@ -114,7 +116,7 @@ public class UsersController : ControllerBase
         return true;
     }
 
-    private static UserMeResponse CreateResponse(ChessGame.Api.Models.User user) =>
+    private UserMeResponse CreateResponse(ChessGame.Api.Models.User user) =>
             new UserMeResponse
             {
                 UserId =
@@ -150,6 +152,7 @@ public class UsersController : ControllerBase
                     },
 
                 Ratings = user.Ratings,
+                Ranks = _ranks.Profiles(user.Ratings),
 
                 Stats =
                     new PlayerStatsResponse

@@ -1,6 +1,6 @@
 namespace ChessGame.Api.Online;
 
-public sealed class AramSide
+public sealed class ChaosSide
 {
     public string Team { get; set; } = "";
     public List<int> DraftOptions { get; set; } = new();
@@ -28,5 +28,5 @@ public sealed class AramSide
     public bool PeaceFailed { get; set; }
     public bool PeaceUsed { get; set; }
     public bool SubstituteUsed { get; set; }
-    public List<AramPieceEffect> Effects { get; set; } = new();
+    public List<ChaosPieceEffect> Effects { get; set; } = new();
 }

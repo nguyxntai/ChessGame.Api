@@ -23,7 +23,7 @@ public sealed partial class OnlineService
                 {
                     m.AcceptDeadline = null;
                     m.ReadyDeadline = now.AddSeconds(config.ReadySeconds);
-                    if (m.Aram is not null) m.Aram.SetupDeadline = m.ReadyDeadline;
+                    if (m.Chaos is not null) m.Chaos.SetupDeadline = m.ReadyDeadline;
                 }
                 await MatchEvent(s, m, "MatchAccepted", now, token);
                 await Save(s, m, token);

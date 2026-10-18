@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using MongoDB.Bson;
@@ -194,7 +193,7 @@ public sealed partial class OnlineService
             if (previous is not null)
             {
                 await EnsureRoomCreationFingerprint(s, previous, token);
-                if (previous.CreationFingerprint != fingerprint) throw new OnlineException("RequestIdConflict");
+                if (!ModeNormalization.MatchesSettingsFingerprint(previous.CreationFingerprint, settings)) throw new OnlineException("RequestIdConflict");
                 return Room(previous);
             }
             await AvailableAsync(s, userId, token);
@@ -209,7 +208,7 @@ public sealed partial class OnlineService
         }, ct);
     }
     private static string RoomCreationFingerprint(GameSettings settings) =>
-        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(OnlineJson.Write(settings))));
+        ModeNormalization.SettingsFingerprint(settings);
 
     private async Task EnsureRoomCreationFingerprint(IClientSessionHandle s, OnlineRoom room, CancellationToken ct)
     {

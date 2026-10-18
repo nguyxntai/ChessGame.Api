@@ -3,30 +3,30 @@ using ChessButWeird.Domain;
 
 namespace ChessGame.Api.Online;
 
-/// <summary>ARAM v2 mirrors the current local Unity rules, not its six-buff legacy wire protocol.</summary>
-public sealed class AramEngine
+/// <summary>CHAOS v2 mirrors the current local Unity rules, not its six-buff legacy wire protocol.</summary>
+public sealed class ChaosEngine
 {
     public static readonly int[][] Tiers = { new[] { 0, 1, 2, 6, 7, 8, 9 },
         new[] { 3, 4, 10, 11, 12, 13, 14 }, new[] { 5, 15, 16, 17, 18, 19, 20 }, new[] { 21, 22, 23, 24, 25 } };
     private static int Random(int count) => RandomNumberGenerator.GetInt32(count);
     private static bool Chance(int percent) => Random(100) < percent;
     private static T Pick<T>(IReadOnlyList<T> values) => values[Random(values.Count)];
-    private static bool Has(AramSide side, int id) => side.BuffId == id;
-    private static AramSide Side(OnlineMatch m, string team) => m.Aram!.Sides.Single(s => s.Team == team);
+    private static bool Has(ChaosSide side, int id) => side.BuffId == id;
+    private static ChaosSide Side(OnlineMatch m, string team) => m.Chaos!.Sides.Single(s => s.Team == team);
     private static bool Home(Square s, string team, int ranks = 4) => team == "White" ? s.Rank < ranks : s.Rank >= 8 - ranks;
     private static int Back(string team) => team == "White" ? 0 : 7;
     private static OnlinePiece? At(OnlineMatch m, Square s) => m.Board.FirstOrDefault(p => p.Square == s.ToString());
     private static OnlinePiece Piece(OnlineMatch m, int? id) => m.Board.FirstOrDefault(p => p.Id == id)
         ?? throw new OnlineException("InvalidAbilityTarget");
     private static OnlinePiece King(OnlineMatch m, string team) => m.Board.First(p => p.Team == team && p.Kind == "King" && !Effect(m, p).Decoy);
-    private static AramPieceEffect Effect(OnlineMatch m, OnlinePiece p)
+    private static ChaosPieceEffect Effect(OnlineMatch m, OnlinePiece p)
     {
         var side = Side(m, p.Team);
         var value = side.Effects.FirstOrDefault(e => e.PieceId == p.Id);
-        if (value is null) { value = new AramPieceEffect { PieceId = p.Id }; side.Effects.Add(value); }
+        if (value is null) { value = new ChaosPieceEffect { PieceId = p.Id }; side.Effects.Add(value); }
         return value;
     }
-    private static bool Available(OnlineMatch m, Square s) => s.IsValid && s.File >= m.Aram!.CollapsedFiles && s.File < 8 - m.Aram.CollapsedFiles;
+    private static bool Available(OnlineMatch m, Square s) => s.IsValid && s.File >= m.Chaos!.CollapsedFiles && s.File < 8 - m.Chaos.CollapsedFiles;
     private static List<Square> Empty(OnlineMatch m, string? team = null, int ranks = 4) =>
         (from y in Enumerable.Range(0, 8) from x in Enumerable.Range(0, 8)
          let s = new Square(x, y) where Available(m, s) && At(m, s) is null && (team is null || Home(s, team, ranks)) select s).ToList();
@@ -34,21 +34,21 @@ public sealed class AramEngine
     public void Initialize(OnlineMatch match, DateTime now)
     {
         var pool = Pick(Tiers);
-        match.Aram = new AramState { SetupDeadline = match.ReadyDeadline };
+        match.Chaos = new ChaosState { SetupDeadline = match.ReadyDeadline };
         foreach (var team in new[] { "White", "Black" })
-            match.Aram.Sides.Add(new AramSide { Team = team, DraftOptions = pool.OrderBy(_ => Random(int.MaxValue)).Take(3).ToList(),
+            match.Chaos.Sides.Add(new ChaosSide { Team = team, DraftOptions = pool.OrderBy(_ => Random(int.MaxValue)).Take(3).ToList(),
                 OriginalQueen = match.Board.First(p => p.Team == team && p.Kind == "Queen").Id });
         // Canonical colliders are independent of cosmetic mesh bounds. Unity must use these for online rifle aiming.
         foreach (var kind in Enum.GetNames<PieceKind>())
-            match.Aram.Hitboxes.Add(new PieceHitbox { Kind = kind, HalfWidth = .3, HalfDepth = .3,
+            match.Chaos.Hitboxes.Add(new PieceHitbox { Kind = kind, HalfWidth = .3, HalfDepth = .3,
                 Height = kind is "King" or "Queen" ? 1.2 : kind == "Pawn" ? .65 : .9 });
     }
-    public bool SetupDone(OnlineMatch m) => m.Aram is null || m.Aram.Phase == "Playing";
+    public bool SetupDone(OnlineMatch m) => m.Chaos is null || m.Chaos.Phase == "Playing";
     public void SetupAbility(OnlineMatch m, string team, AbilityCommand c, DateTime now)
     {
         var side = Side(m, team);
-        if (m.Aram!.Phase == "Playing") throw new OnlineException("SetupAlreadyCompleted");
-        if (now >= m.Aram.SetupDeadline) throw new OnlineException("SetupExpired");
+        if (m.Chaos!.Phase == "Playing") throw new OnlineException("SetupAlreadyCompleted");
+        if (now >= m.Chaos.SetupDeadline) throw new OnlineException("SetupExpired");
         switch (c.Kind)
         {
             case "SelectBuff":
@@ -56,17 +56,17 @@ public sealed class AramEngine
                     throw new OnlineException("InvalidBuffSelection");
                 side.BuffId = c.BuffId;
                 side.SetupComplete = side.BuffId is not (0 or 3);
-                if (m.Aram.Sides.All(s => s.BuffId is not null))
+                if (m.Chaos.Sides.All(s => s.BuffId is not null))
                 {
-                    foreach (var s in m.Aram.Sides) InitialEffects(m, s);
-                    if (m.Aram.Sides.Any(s => Has(s, 23)))
-                        m.ReadyDeadline = m.Aram.SetupDeadline = now.AddSeconds(180);
-                    foreach (var s in m.Aram.Sides.Where(s => Has(s, 23))) s.FormationDeadline = now.AddSeconds(120);
-                    m.Aram.Phase = "Setup";
+                    foreach (var s in m.Chaos.Sides) InitialEffects(m, s);
+                    if (m.Chaos.Sides.Any(s => Has(s, 23)))
+                        m.ReadyDeadline = m.Chaos.SetupDeadline = now.AddSeconds(180);
+                    foreach (var s in m.Chaos.Sides.Where(s => Has(s, 23))) s.FormationDeadline = now.AddSeconds(120);
+                    m.Chaos.Phase = "Setup";
                 }
                 break;
             case "SelectTargets":
-                if (m.Aram.Phase != "Setup" || side.SetupComplete) throw new OnlineException("InvalidSetupPhase");
+                if (m.Chaos.Phase != "Setup" || side.SetupComplete) throw new OnlineException("InvalidSetupPhase");
                 var selected = c.PieceIds.Select(id => Piece(m, id)).ToList();
                 if (selected.Select(p => p.Id).Distinct().Count() != selected.Count || selected.Any(p => p.Team != team))
                     throw new OnlineException("InvalidAbilityTarget");
@@ -87,7 +87,7 @@ public sealed class AramEngine
                 side.SetupComplete = true;
                 break;
             case "ConfirmFormation":
-                if (m.Aram.Phase != "Setup" || !Has(side, 23) || side.FormationComplete) throw new OnlineException("InvalidAbility");
+                if (m.Chaos.Phase != "Setup" || !Has(side, 23) || side.FormationComplete) throw new OnlineException("InvalidAbility");
                 ConfirmFormation(m, side, c.Formation);
                 break;
             default: throw new OnlineException("InvalidSetupPhase");
@@ -96,10 +96,10 @@ public sealed class AramEngine
     }
     private void CompleteSetup(OnlineMatch m)
     {
-        if (m.Aram!.Phase != "Playing" && m.Aram.Sides.All(s => s.BuffId is not null && s.SetupComplete && (!Has(s, 23) || s.FormationComplete)))
-        { m.Aram.Phase = "Playing"; BeginTurn(m); }
+        if (m.Chaos!.Phase != "Playing" && m.Chaos.Sides.All(s => s.BuffId is not null && s.SetupComplete && (!Has(s, 23) || s.FormationComplete)))
+        { m.Chaos.Phase = "Playing"; BeginTurn(m); }
     }
-    private void InitialEffects(OnlineMatch m, AramSide side)
+    private void InitialEffects(OnlineMatch m, ChaosSide side)
     {
         var army = m.Board.Where(p => p.Team == side.Team).ToList();
         if (Has(side, 24) || Has(side, 25))
@@ -117,7 +117,7 @@ public sealed class AramEngine
         if (Has(side, 16)) foreach (var p in army.Where(p => p.Kind == "Rook")) Effect(m, p).CannonUntil = 10;
         if (Has(side, 23)) side.OriginalFormation = army.Select(p => new FormationPlacement(p.Id, p.Square)).ToList();
     }
-    private void ConfirmFormation(OnlineMatch m, AramSide side, List<FormationPlacement> placements)
+    private void ConfirmFormation(OnlineMatch m, ChaosSide side, List<FormationPlacement> placements)
     {
         var army = m.Board.Where(p => p.Team == side.Team).ToList();
         if (placements.Count != army.Count || placements.Select(p => p.PieceId).Distinct().Count() != army.Count ||
@@ -141,11 +141,11 @@ public sealed class AramEngine
     }
     private readonly struct Context(OnlineMatch m) : IBuffContextProvider
     {
-        public AramPieceContext GetContext(PieceState piece)
+        public ChaosPieceContext GetContext(PieceState piece)
         {
             var side = Side(m, piece.Team.ToString());
             var e = side.Effects.FirstOrDefault(x => x.PieceId == piece.Id);
-            return new AramPieceContext(side.BuffId is null ? AramBuffs.None : (AramBuffs)(1 << side.BuffId.Value),
+            return new ChaosPieceContext(side.BuffId is null ? ChaosBuffs.None : (ChaosBuffs)(1 << side.BuffId.Value),
                 side.CommandantPawns.Contains(piece.Id), side.SwappedKnight == piece.Id && side.SwapActive,
                 side.SwappedBishop == piece.Id && side.SwapActive, side.OriginalQueen == piece.Id,
                 side.TeleportUses < 5 && side.CompletedTurns >= side.TeleportReady,
@@ -169,15 +169,15 @@ public sealed class AramEngine
     public void ApplyMove(OnlineMatch m, Move move)
     {
         if (!TryMove(m, move, out var next)) throw new OnlineException("InvalidMove");
-        // TryMove's copy includes all ARAM effects. Copy back only after complete validation.
+        // TryMove's copy includes all CHAOS effects. Copy back only after complete validation.
         m.Board = next.Board; m.Turn = next.Turn; m.EnPassantTarget = next.EnPassantTarget;
-        m.HalfMoveClock = next.HalfMoveClock; m.FullMoveNumber = next.FullMoveNumber; m.Aram = next.Aram; m.Captures = next.Captures;
+        m.HalfMoveClock = next.HalfMoveClock; m.FullMoveNumber = next.FullMoveNumber; m.Chaos = next.Chaos; m.Captures = next.Captures;
     }
     private bool TryMove(OnlineMatch original, Move move, out OnlineMatch next, bool simulate = false)
     {
         next = OnlineJson.Clone(original);
         var m = next;
-        var a = m.Aram!;
+        var a = m.Chaos!;
         if (a.Phase != "Playing" || a.Rifle is not null || a.EscapeTeam is not null || a.Deployments.Count > 0 ||
             !Available(m, move.From) || !Available(m, move.To) || move.From == move.To) return false;
         var moving = At(m, move.From); var captured = At(m, move.To);
@@ -200,8 +200,8 @@ public sealed class AramEngine
             captured = At(m, new Square(move.To.File, move.From.Rank));
             if (captured is null || captured.Team == moving.Team || captured.Kind != "Pawn") return false;
         }
-        bool pattern = !AramRules.SuppressesStandardMovement(context) && !allied && MovementRules.IsLegalPattern(state.Board, p, move.From, move.To);
-        bool extension = AramRules.BuiltIn.Allows(state.Board, p, move.From, move.To, context);
+        bool pattern = !ChaosRules.SuppressesStandardMovement(context) && !allied && MovementRules.IsLegalPattern(state.Board, p, move.From, move.To);
+        bool extension = ChaosRules.BuiltIn.Allows(state.Board, p, move.From, move.To, context);
         if (!pattern && !extension && !castle && !ep) return false;
         bool teleported = moving.Id == side.OriginalQueen && Has(side, 5) && !pattern;
         bool extra = false;
@@ -225,7 +225,7 @@ public sealed class AramEngine
         bool wasPawn = p.Kind == PieceKind.Pawn;
         if (promotion && m.Board.Contains(moving)) moving.Kind = move.Promotion!.Value.ToString();
         if (moving.Kind == "Pawn" && Has(side, 11) && move.To.Rank == Back(moving.Team) && move.To.Rank - move.From.Rank == -moving.Forward)
-        { Remove(m, moving, false); a.Mines.Add(new AramMarker { Square = move.To.ToString(), Team = moving.Team }); }
+        { Remove(m, moving, false); a.Mines.Add(new ChaosMarker { Square = move.To.ToString(), Team = moving.Team }); }
         Land(m, moving, move.To);
         if (InCheck(m, moving.Team)) return false;
         m.EnPassantTarget = wasPawn && Math.Abs(move.To.Rank - move.From.Rank) == 2
@@ -268,7 +268,7 @@ public sealed class AramEngine
     private static OnlinePiece Spawn(OnlineMatch m, string team, string kind, Square square, bool moved = true)
     {
         if (!Available(m, square) || At(m, square) is not null) throw new OnlineException("InvalidAbilityTarget");
-        var p = new OnlinePiece { Id = m.Aram!.NextPieceId++, Team = team, Kind = kind, Square = square.ToString(),
+        var p = new OnlinePiece { Id = m.Chaos!.NextPieceId++, Team = team, Kind = kind, Square = square.ToString(),
             Forward = team == "White" ? 1 : -1, HasMoved = moved };
         m.Board.Add(p); return p;
     }
@@ -277,7 +277,7 @@ public sealed class AramEngine
         if (!m.Board.Remove(p)) return;
         var effect = Effect(m, p);
         if (effect.Passenger && releasePassenger)
-        { effect.Passenger = false; m.Aram!.Deployments.Add(new AramDeployment { Team = p.Team, Center = p.Square }); }
+        { effect.Passenger = false; m.Chaos!.Deployments.Add(new ChaosDeployment { Team = p.Team, Center = p.Square }); }
     }
     private void Detonate(OnlineMatch m, OnlinePiece queen, Square center)
     {
@@ -293,12 +293,12 @@ public sealed class AramEngine
     private static void Land(OnlineMatch m, OnlinePiece p, Square to)
     {
         if (!m.Board.Contains(p)) return;
-        var mine = m.Aram!.Mines.FirstOrDefault(x => x.Square == to.ToString() && x.Team != p.Team);
-        if (mine is not null) { m.Aram.Mines.Remove(mine); Remove(m, p); return; }
-        var crate = m.Aram.Crates.FirstOrDefault(x => x.Square == to.ToString());
+        var mine = m.Chaos!.Mines.FirstOrDefault(x => x.Square == to.ToString() && x.Team != p.Team);
+        if (mine is not null) { m.Chaos.Mines.Remove(mine); Remove(m, p); return; }
+        var crate = m.Chaos.Crates.FirstOrDefault(x => x.Square == to.ToString());
         if (crate is null) return;
-        m.Aram.Crates.Remove(crate);
-        if (crate.Team == p.Team) m.Aram.Deployments.Add(new AramDeployment { Team = p.Team, Kind = crate.Kind });
+        m.Chaos.Crates.Remove(crate);
+        if (crate.Team == p.Team) m.Chaos.Deployments.Add(new ChaosDeployment { Team = p.Team, Kind = crate.Kind });
     }
     private void CompleteTurn(OnlineMatch m, string team)
     {
@@ -312,7 +312,7 @@ public sealed class AramEngine
             {
                 side.Effects.Remove(e); p.Team = GameRules.Other(team); p.Forward = -p.Forward; p.HasMoved = true;
                 // Unity replaces the queen, clearing infection/cannon/passenger state while retaining instability.
-                Side(m, p.Team).Effects.Add(new AramPieceEffect { PieceId = p.Id, Unstable = true });
+                Side(m, p.Team).Effects.Add(new ChaosPieceEffect { PieceId = p.Id, Unstable = true });
             }
         }
         if (team == "Black") m.FullMoveNumber++;
@@ -321,7 +321,7 @@ public sealed class AramEngine
     }
     private void BeginTurn(OnlineMatch m)
     {
-        var a = m.Aram!; var side = Side(m, m.Turn); side.RollsThisTurn = 0;
+        var a = m.Chaos!; var side = Side(m, m.Turn); side.RollsThisTurn = 0;
         if (!m.Board.Any(p => p.Team == m.Turn && p.Kind == "King" && !Effect(m, p).Decoy)) return;
         if (InCheck(m, m.Turn))
         {
@@ -345,7 +345,7 @@ public sealed class AramEngine
             foreach (var owner in a.Sides.Where(s => Has(s, 9)))
             {
                 var empty = Empty(m).Where(s => a.Crates.All(c => c.Square != s.ToString())).ToList();
-                if (empty.Count > 0) a.Crates.Add(new AramMarker { Team = owner.Team, Kind = milestone == 25 ? "Rook" : "Queen", Square = Pick(empty).ToString() });
+                if (empty.Count > 0) a.Crates.Add(new ChaosMarker { Team = owner.Team, Kind = milestone == 25 ? "Rook" : "Queen", Square = Pick(empty).ToString() });
             }
         }
         if (a.Sides.Any(s => Has(s, 18)))
@@ -357,7 +357,7 @@ public sealed class AramEngine
         }
         a.Deployments.RemoveAll(d => DeploymentSquares(m, d).Count == 0);
     }
-    private static List<Square> DeploymentSquares(OnlineMatch m, AramDeployment d)
+    private static List<Square> DeploymentSquares(OnlineMatch m, ChaosDeployment d)
     {
         var squares = d.Center is null ? Empty(m, d.Team) : Empty(m);
         if (d.Center is not null) { var c = GameRules.Square(d.Center); squares.RemoveAll(s => Math.Abs(s.File - c.File) > 1 || Math.Abs(s.Rank - c.Rank) > 1); }
@@ -375,7 +375,7 @@ public sealed class AramEngine
     }
     public (string? WinnerTeam, string Reason)? Outcome(OnlineMatch m)
     {
-        var a = m.Aram!;
+        var a = m.Chaos!;
         bool white = m.Board.Any(p => p.Team == "White" && p.Kind == "King" && !Effect(m, p).Decoy);
         bool black = m.Board.Any(p => p.Team == "Black" && p.Kind == "King" && !Effect(m, p).Decoy);
         if (!white || !black) return (!white && !black ? null : white ? "White" : "Black", "KingDestroyed");
@@ -393,7 +393,7 @@ public sealed class AramEngine
     }
     public void ApplyAbility(OnlineMatch m, string team, AbilityCommand c, DateTime now)
     {
-        var a = m.Aram!; var side = Side(m, team);
+        var a = m.Chaos!; var side = Side(m, team);
         if (a.Phase != "Playing") { SetupAbility(m, team, c, now); return; }
         if (a.Deployments.Count > 0)
         {
@@ -466,9 +466,9 @@ public sealed class AramEngine
     }
     private static void Require(bool condition, string code = "InsufficientAbilityResource")
     { if (!condition) throw new OnlineException(code); }
-    private void FireRifle(OnlineMatch m, AramSide side, AbilityCommand c, DateTime now)
+    private void FireRifle(OnlineMatch m, ChaosSide side, AbilityCommand c, DateTime now)
     {
-        var a = m.Aram!; var rifle = a.Rifle;
+        var a = m.Chaos!; var rifle = a.Rifle;
         Require(Has(side, 25) && rifle?.Team == side.Team && now < rifle.Deadline, "RifleExpired");
         Require(c.Yaw.HasValue && c.Pitch.HasValue && double.IsFinite(c.Yaw.Value) && double.IsFinite(c.Pitch.Value) &&
             c.Pitch.Value >= -80 && c.Pitch.Value <= 80 && Math.Abs(c.Yaw.Value) <= 36000, "InvalidAim");
@@ -504,14 +504,14 @@ public sealed class AramEngine
     public bool Tick(OnlineMatch m, DateTime now)
     {
         bool changed = false;
-        if (m.Aram is { Phase: "Setup" } setup)
+        if (m.Chaos is { Phase: "Setup" } setup)
         {
             foreach (var side in setup.Sides.Where(s => Has(s, 23) && !s.FormationComplete && s.FormationDeadline <= now).ToList())
             { ConfirmFormation(m, side, side.OriginalFormation); changed = true; }
             if (changed) CompleteSetup(m);
         }
-        if (m.Aram?.Rifle is { } rifle && now >= rifle.Deadline)
-        { Side(m, rifle.Team).RifleReady = Side(m, rifle.Team).CompletedTurns + 3; m.Aram.Rifle = null; changed = true; }
+        if (m.Chaos?.Rifle is { } rifle && now >= rifle.Deadline)
+        { Side(m, rifle.Team).RifleReady = Side(m, rifle.Team).CompletedTurns + 3; m.Chaos.Rifle = null; changed = true; }
         return changed;
     }
 }

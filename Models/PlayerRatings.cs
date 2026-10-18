@@ -1,16 +1,18 @@
 using MongoDB.Bson.Serialization.Attributes;
+using ChessGame.Api.Online;
 
 namespace ChessGame.Api.Models;
 
+[BsonSerializer(typeof(ChaosDocumentSerializer<PlayerRatings>))]
 public sealed class PlayerRatings
 {
     [BsonElement("version")] public int Version { get; set; } = 1;
     [BsonElement("legacyMixedElo")] public int? LegacyMixedElo { get; set; }
     [BsonElement("classic")] public ModeRating Classic { get; set; } = new();
-    [BsonElement("aram")] public ModeRating Aram { get; set; } = new();
-    public ModeRating For(string mode) => mode switch
+    [BsonElement("chaos")] public ModeRating Chaos { get; set; } = new();
+    public ModeRating For(string mode) => ModeNormalization.Require(mode) switch
     {
-        "Classic" => Classic, "Aram" or "ARAM" => Aram,
+        "Classic" => Classic, "Chaos" => Chaos,
         _ => throw new ArgumentException("Unsupported rating mode.", nameof(mode))
     };
 }

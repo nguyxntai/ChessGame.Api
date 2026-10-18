@@ -1,12 +1,14 @@
 using MongoDB.Bson.Serialization.Attributes;
+using ChessGame.Api.Online;
 
 namespace ChessGame.Api.Models;
 
+[BsonSerializer(typeof(ChaosDocumentSerializer<ColorHistories>))]
 public sealed class ColorHistories
 {
     [BsonElement("classic")] public ColorHistory Classic { get; set; } = new();
-    [BsonElement("aram")] public ColorHistory Aram { get; set; } = new();
-    public ColorHistory For(string mode) => mode == "Classic" ? Classic : Aram;
+    [BsonElement("chaos")] public ColorHistory Chaos { get; set; } = new();
+    public ColorHistory For(string mode) => ModeNormalization.Require(mode) == "Classic" ? Classic : Chaos;
 }
 public sealed class ColorHistory
 {

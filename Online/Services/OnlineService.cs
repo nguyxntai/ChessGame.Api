@@ -3,14 +3,15 @@ using System.Text;
 using ChessButWeird.Domain;
 using ChessGame.Api.Models;
 using ChessGame.Api.Services.Ratings;
+using ChessGame.Api.Services.Ranks;
 using Microsoft.Extensions.Options;
 using MongoDB.Bson;
 using MongoDB.Driver;
 
 namespace ChessGame.Api.Online;
 
-public sealed partial class OnlineService(OnlineStore store, GameRules rules, AramEngine aram,
-    IOptions<OnlineOptions> options, OnlineRuntimeLease lease)
+public sealed partial class OnlineService(OnlineStore store, GameRules rules, ChaosEngine chaos,
+    IOptions<OnlineOptions> options, OnlineRuntimeLease lease, RankService ranks)
 {
     private readonly OnlineOptions config = options.Value;
     private static bool Active(OnlineMatch m) => m.Status is "AwaitingReady" or "InProgress";
@@ -26,12 +27,12 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ar
         double white = m.WhiteMilliseconds, black = m.BlackMilliseconds;
         if (m.Status == "InProgress") { if (m.Turn == "White") white -= Elapsed(m, now); else black -= Elapsed(m, now); }
         string fen = FenCodec.Write(GameRules.Read(m));
-        var custom = m.Aram is null ? null : OnlineJson.Clone(m.Aram);
+        var custom = m.Chaos is null ? null : OnlineJson.Clone(m.Chaos);
         if (custom is not null && userId is not null)
             foreach (var s in custom.Sides) if (s.Team != m.Players.Single(p => p.UserId == userId).Color) s.DraftOptions.Clear();
         return new(m.Id, m.Status, m.Settings, m.StateVersion, m.EventSequence, now, m.Turn,
             m.Board.Select(p => new PieceSnapshot(p.Id, p.Kind, p.Team, p.Square, p.HasMoved, p.Forward)).ToList(),
-            m.Aram is null ? fen : null, fen.Split(' ')[2], m.EnPassantTarget, m.HalfMoveClock, m.FullMoveNumber,
+            m.Chaos is null ? fen : null, fen.Split(' ')[2], m.EnPassantTarget, m.HalfMoveClock, m.FullMoveNumber,
             new(Math.Max(0, white), Math.Max(0, black), m.ClockStartedAt is not null && m.Status == "InProgress" ? m.Turn : null, now),
             m.Players.Select(Player).ToList(), m.ReadyDeadline, m.DrawOffer, custom, m.Result, m.RematchId, m.Rated, m.AcceptDeadline,
             m.CaptureHistoryVersion == 1 ? m.Captures.ToList() : null);
@@ -39,7 +40,7 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ar
     private GameSettings ValidateSettings(GameSettings settings)
     {
         if (settings is null || settings.ProtocolVersion != config.ProtocolVersion) throw new OnlineException("ProtocolVersionMismatch", 400);
-        string mode = settings.Mode?.Trim().ToUpperInvariant() switch { "CLASSIC" => "Classic", "ARAM" => "Aram", _ => "" };
+        string mode = ModeNormalization.Require(settings.Mode, "InvalidSettings");
         string region = settings.Region?.Trim().ToUpperInvariant() ?? "";
         if (mode == "" || region.Length is < 2 or > 16 || region.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '-') ||
             settings.InitialSeconds is < 60 or > 7200 || settings.IncrementSeconds is < 0 or > 60)
@@ -190,7 +191,7 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ar
                 new ReplaceOptions { IsUpsert = true }, ct);
         }
         GameRules.Write(m, FenCodec.Parse(FenCodec.InitialPosition));
-        if (settings.Mode == "Aram") aram.Initialize(m, now);
+        if (settings.Mode == "Chaos") chaos.Initialize(m, now);
         else GameRules.RecordPosition(m);
         await MatchEvent(s, m, "MatchFound", now, ct);
         await store.Matches.InsertOneAsync(s, m, cancellationToken: ct);
@@ -212,7 +213,7 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ar
             return;
         }
         if (ReadyExpired(m, now)) { await Cancel(s, m, "ReadyTimeout", now, ct); return; }
-        if (!m.Players.All(p => p.Ready && p.Connected) || !aram.SetupDone(m)) return;
+        if (!m.Players.All(p => p.Ready && p.Connected) || !chaos.SetupDone(m)) return;
         // Revalidate against current inventory and then freeze this loadout for the lifetime of the match.
         try
         {
@@ -230,7 +231,22 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ar
     {
         if (!Active(m)) return;
         m.Status = "Cancelled"; m.FinishedAt = now; m.ClockStartedAt = null; m.StateVersion++;
-        m.Result = new OfficialResult { Outcome = "Cancelled", Reason = reason, FinishedAt = now };
+        m.Result = new OfficialResult { Outcome = "Cancelled", Reason = reason, FinishedAt = now,
+            RatingMode = m.Settings.Mode, RatingPolicy = RatingPolicies.Version(m.Settings.Mode),
+            RatingDecision = "CancelledBeforeStart", RewardDecision = "CancelledBeforeStart" };
+        foreach (var p in m.Players)
+        {
+            var id = ObjectId.Parse(p.UserId);
+            var user = await store.Users.Find(s, u => u.Id == id).FirstOrDefaultAsync(ct)
+                ?? throw new InvalidOperationException("A match participant was deleted.");
+            var rating = user.Ratings.For(m.Settings.Mode);
+            var entry = new PlayerResult { UserId = p.UserId, RatingBefore = RatingPolicies.Display(rating.Rating),
+                RatingAfter = RatingPolicies.Display(rating.Rating), RatedGamesAfter = rating.RatedGames,
+                RatingDeviationAfter = m.Settings.Mode == "Chaos" ? rating.Deviation : null,
+                RatingApplied = false, RatingDecision = m.Result.RatingDecision };
+            ranks.Snapshot(entry, m.Settings.Mode, rating, rating, applied: false);
+            m.Result.Players.Add(entry);
+        }
         await store.Seats.DeleteManyAsync(s, x => x.ReferenceId == m.Id && x.Kind == "Match", cancellationToken: ct);
         await MatchEvent(s, m, "MatchCancelled", now, ct); await Save(s, m, ct);
     }
@@ -254,7 +270,7 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ar
         var beforeBlack = black.Ratings.For(m.Settings.Mode);
         // Both calculations use the same pre-settlement states; never feed the winner's new rating to the loser.
         ModeRating Calculate(ModeRating player, ModeRating opponent, double value) => !eligibility.Rating ? player :
-            m.Settings.Mode == "Classic" ? RatingPolicies.Classic(player, opponent, value, now) : RatingPolicies.Aram(player, opponent, value, now);
+            m.Settings.Mode == "Classic" ? RatingPolicies.Classic(player, opponent, value, now) : RatingPolicies.Chaos(player, opponent, value, now);
         var afterWhite = Calculate(beforeWhite, beforeBlack, score);
         var afterBlack = Calculate(beforeBlack, beforeWhite, 1 - score);
         foreach (var user in new[] { white, black })
@@ -268,9 +284,11 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ar
                 Diamonds = eligibility.Rewards ? (win ? 12 : draw ? 6 : 3) : 0, Tickets = eligibility.Rewards && win ? 1 : 0,
                 RatingDeviationAfter = m.Settings.Mode != "Classic" ? after.Deviation : null, RatedGamesAfter = after.RatedGames };
             entry.RatingChange = entry.RatingAfter - entry.RatingBefore;
+            entry.RatingApplied = result.RatingApplied; entry.RatingDecision = result.RatingDecision;
+            ranks.Snapshot(entry, m.Settings.Mode, before, after, eligibility.Rating);
             var update = Builders<User>.Update.Set(u => u.UpdatedAt, now);
-            if (eligibility.Rating) update = update.Set(m.Settings.Mode == "Classic" ? "ratings.classic" : "ratings.aram", after);
-            if (result.StatsApplied) update = update.Set(m.Settings.Mode == "Classic" ? "onlineColors.classic" : "onlineColors.aram",
+            if (eligibility.Rating) update = update.Set(m.Settings.Mode == "Classic" ? "ratings.classic" : "ratings.chaos", after);
+            if (result.StatsApplied) update = update.Set(m.Settings.Mode == "Classic" ? "onlineColors.classic" : "onlineColors.chaos",
                 user.OnlineColors.For(m.Settings.Mode).Played(p.Color)).Inc(u => u.Stats.GamesPlayed, 1).Inc(u => u.Stats.Wins, win ? 1 : 0)
                 .Inc(u => u.Stats.Draws, draw ? 1 : 0).Inc(u => u.Stats.Losses, !win && !draw ? 1 : 0);
             update = update.Inc(u => u.Wallet.Golds, entry.Golds).Inc(u => u.Wallet.Diamonds, entry.Diamonds)
@@ -291,7 +309,7 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ar
         await MatchEvent(s, m, "MatchEnded", now, ct); await Save(s, m, ct);
     }
     private static bool ReadyExpired(OnlineMatch m, DateTime now) => now >= m.ReadyDeadline ||
-        m.Aram is { Phase: not "Playing" } a && now >= a.SetupDeadline;
+        m.Chaos is { Phase: not "Playing" } a && now >= a.SetupDeadline;
 
     private async Task Advance(IClientSessionHandle s, OnlineMatch m, DateTime now, CancellationToken ct)
     {
@@ -305,7 +323,7 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ar
             }
             // Expiration takes precedence over formation fallback, including delayed sweeps/recovery.
             if (ReadyExpired(m, now)) { await Cancel(s, m, "ReadyTimeout", now, ct); return; }
-            if (aram.Tick(m, now))
+            if (chaos.Tick(m, now))
             {
                 m.StateVersion++; await MatchEvent(s, m, "GameStateUpdated", now, ct);
                 await StartIfReady(s, m, now, ct); await Save(s, m, ct);
@@ -334,7 +352,7 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ar
             await Emit(s, "DrawResolved", new { matchId = m.Id, offerId = offer.Id, accepted = false, reason = "DrawOfferExpired" },
                 m.Players.Select(p => p.UserId).ToList(), ct, m);
         }
-        if (aram.Tick(m, now))
+        if (chaos.Tick(m, now))
         {
             m.StateVersion++; changed = true;
             var outcome = rules.Outcome(m);

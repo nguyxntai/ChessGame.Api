@@ -4,7 +4,7 @@ using ChessButWeird.Domain;
 
 namespace ChessGame.Api.Online;
 
-public sealed class GameRules(AramEngine aram)
+public sealed class GameRules(ChaosEngine chaos)
 {
     public static MatchState Read(OnlineMatch match)
     {
@@ -55,7 +55,7 @@ public sealed class GameRules(AramEngine aram)
             promotion = kind;
         }
         var move = new Move(Square(command.From), Square(command.To), promotion);
-        if (match.Aram is not null) aram.ApplyMove(match, move);
+        if (match.Chaos is not null) chaos.ApplyMove(match, move);
         else
         {
             if (!ClassicRules.TryApply(Read(match), move, out var result)) throw new OnlineException("InvalidMove");
@@ -76,12 +76,12 @@ public sealed class GameRules(AramEngine aram)
     }
     public void ApplyAbility(OnlineMatch match, string team, AbilityCommand command, DateTime now)
     {
-        if (match.Aram is null) throw new OnlineException("AbilityNotSupported");
-        aram.ApplyAbility(match, team, command, now);
+        if (match.Chaos is null) throw new OnlineException("AbilityNotSupported");
+        chaos.ApplyAbility(match, team, command, now);
     }
     public (string? WinnerTeam, string Reason)? Outcome(OnlineMatch match)
     {
-        if (match.Aram is not null) return aram.Outcome(match);
+        if (match.Chaos is not null) return chaos.Outcome(match);
         var state = Read(match);
         if (ClassicRules.LegalMoves(state).Count == 0)
             return ClassicRules.IsInCheck(state.Board, state.Turn)
@@ -94,7 +94,7 @@ public sealed class GameRules(AramEngine aram)
     public string ClaimDraw(OnlineMatch match, string team)
     {
         if (match.Turn != team) throw new OnlineException("NotYourTurn");
-        if (match.Aram is not null) throw new OnlineException("DrawClaimNotSupported");
+        if (match.Chaos is not null) throw new OnlineException("DrawClaimNotSupported");
         if (match.HalfMoveClock >= 100) return "FiftyMoveRule";
         if (match.Repetitions.GetValueOrDefault(PositionKey(match)) >= 3) return "ThreefoldRepetition";
         throw new OnlineException("DrawNotClaimable");
@@ -109,7 +109,7 @@ public sealed class GameRules(AramEngine aram)
     }
     public static bool CanPossiblyMate(OnlineMatch match, string team)
     {
-        if (match.Aram is not null) return match.Board.Any(p => p.Team == team && p.Kind == "King");
+        if (match.Chaos is not null) return match.Board.Any(p => p.Team == team && p.Kind == "King");
         var own = match.Board.Where(p => p.Team == team && p.Kind != "King").ToList();
         if (own.Count == 0 || IsDeadPosition(match.Board)) return false;
         if (own.Count == 1 && own[0].Kind is "Bishop" or "Knight" &&

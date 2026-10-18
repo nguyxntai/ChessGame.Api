@@ -5,9 +5,10 @@ namespace ChessGame.Api.Services.Ratings;
 public static class RatingPolicies
 {
     public const string ClassicVersion = "classic-elo-v1";
-    public const string AramVersion = "aram-glicko2-v1";
-    public static string Version(string mode) => mode switch
-    { "Classic" => ClassicVersion, "Aram" or "ARAM" => AramVersion, _ => throw new ArgumentException("Unsupported rating mode.") };
+    public const string ChaosVersion = "chaos-glicko2-v1";
+    // chaos-glicko2-v1 is a rename of aram-glicko2-v1; formula and parameters are unchanged.
+    public static string Version(string mode) => ChessGame.Api.Online.ModeNormalization.Require(mode) switch
+    { "Classic" => ClassicVersion, "Chaos" => ChaosVersion, _ => throw new ArgumentException("Unsupported rating mode.") };
 
     // Classic is instant game Elo inspired by FIDE, not official monthly FIDE rating.
     // No age data is collected; junior K and monthly rating-list rules are intentionally not inferred.
@@ -22,9 +23,9 @@ public static class RatingPolicies
         return Next(player, rating, player.Deviation, player.Volatility, now);
     }
 
-    // ARAM uses one accepted match per period, tau=.2, a persistent RD floor for game noise,
+    // CHAOS uses one accepted match per period, tau=.2, a persistent RD floor for game noise,
     // and a 75 point movement cap. This adaptation needs calibration on real match data.
-    public static ModeRating Aram(ModeRating player, ModeRating opponent, double score, DateTime now)
+    public static ModeRating Chaos(ModeRating player, ModeRating opponent, double score, DateTime now)
     {
         ValidateScore(score);
         var state = Glicko2.Update(new(player.Rating, DeviationAt(player, now), player.Volatility),

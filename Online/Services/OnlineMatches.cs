@@ -5,7 +5,7 @@ namespace ChessGame.Api.Online;
 
 public sealed partial class OnlineService
 {
-    // Metadata/history must not download board, ARAM state or repetition history.
+    // Metadata/history must not download board, CHAOS state or repetition history.
     private static readonly ProjectionDefinition<OnlineMatch, OnlineMatch> SummaryProjection =
         Builders<OnlineMatch>.Projection.Expression(m => new OnlineMatch
         {

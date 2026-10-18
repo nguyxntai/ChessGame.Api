@@ -6,7 +6,9 @@ from the JWT `sub`/name identifier; clients cannot select another user.
 ## GET /api/users/me
 
 Returns the existing Unity `UserMeResponse`: `userId`, `username`, `email`,
-`profile`, `wallet`, `stats`, `equipped`, and `createdAt`. No password hash,
+`profile`, `wallet`, `stats`, `equipped`, and `createdAt`, plus independent
+`ratings.classic` / `ratings.chaos` and computed `ranks.classic` / `ranks.chaos`.
+See [rank API and migration](ranks-and-chaos.md) for fields and examples. No password hash,
 normalized login fields, tokens or internal account flags are exposed.
 
 ## PATCH /api/users/me/profile
