@@ -208,7 +208,9 @@ Không tự thêm cơ chế gắn ReviewRequired cho mọi lỗi hay hình phạ
 ## Migration offline, backup và rollout
 
 Script `Migrations/chaos-v1.mongosh.js` **chỉ được chuẩn bị, chưa chạy**.
-Dùng mongosh trên database được chọn rõ ràng; không đặt credential trong source/log/history.
+Dùng mongosh với `CHAOS_MIGRATION_DATABASE` bằng đúng `MongoDb:DatabaseName` của API
+(trên Render thường là biến `MongoDb__DatabaseName`). Script bắt buộc chọn database rõ ràng,
+không dựa vào database mặc định trong URI; không đặt credential trong source/log/history.
 Plan mặc định chỉ đọc. Apply yêu cầu cả `CHAOS_MIGRATION_APPLY=YES` và
 `CHAOS_MIGRATION_OFFLINE=YES`, từ chối nếu runtime lease chưa hết hạn.
 
@@ -221,8 +223,12 @@ Plan mặc định chỉ đọc. Apply yêu cầu cả `CHAOS_MIGRATION_APPLY=YE
    Giữ bản backend/config cũ, database name và thời điểm backup. Journal không thay thế full backup.
 4. Chạy plan trên DB đã dừng ghi, giải quyết mọi conflict bằng dữ liệu/audit thực tế, rồi plan lại.
    Không tự gộp hai profile khác nhau, không chọn profile theo rating cao hơn hay nhiều trận hơn.
-5. Apply bằng một tiến trình migration trong maintenance. Script preflight toàn bộ collection trước khi ghi. Nó nạp collection/plan
-   vào RAM, cần đủ bộ nhớ cho dataset; database lớn cần quy trình vận hành phân lô có cùng preflight/journal.
+5. Apply bằng một tiến trình migration trong maintenance. Script preflight toàn bộ collection trước khi ghi,
+   đọc cursor batch 25 document. Plan chỉ giữ số liệu, không giữ bản sao toàn bộ document; có log tiến độ
+   mỗi collection và mỗi 250 document, hiển thị tối đa 50 conflict kèm tổng số.
+   Apply giữ kế hoạch thay đổi với giới hạn 32 MiB ước lượng chuỗi document gốc/đích (không phải giới hạn
+   toàn bộ RAM process); nếu vượt giới hạn thì dừng trước mọi migration write. Database lớn cần quy trình
+   vận hành phân lô có cùng preflight/journal. Khóa pool của ticket Queued vẫn được giữ để đối chiếu.
 6. Nếu gián đoạn, giữ API tắt; sửa nguyên nhân và chạy lại. Marker `schema_migrations/chaos-v1`
    Running chặn backend mới khởi động. Journal `_chaos_v1_backup` lưu original của từng document đổi
    và hash đích, majority write; giữ hạn chế quyền truy cập vì có bản sao user document.
@@ -236,7 +242,10 @@ Plan mặc định chỉ đọc. Apply yêu cầu cả `CHAOS_MIGRATION_APPLY=YE
 Ví dụ PowerShell vận hành (placeholder, **không thực hiện trong phiên code**):
 
 ```powershell
-# MONGODB_URI phải được vận hành cấp an toàn và có database đích rõ ràng.
+# MONGODB_URI lấy an toàn từ cùng cấu hình MongoDb:ConnectionString của API.
+$env:CHAOS_MIGRATION_DATABASE = '<gia-tri-MongoDb__DatabaseName-cua-API>'
+# Bảo đảm lần đầu chỉ lập plan, kể cả terminal đã từng bật apply:
+Remove-Item Env:CHAOS_MIGRATION_APPLY, Env:CHAOS_MIGRATION_OFFLINE -ErrorAction SilentlyContinue
 mongosh $env:MONGODB_URI --file .\Migrations\chaos-v1.mongosh.js
 # Chỉ sau khi có full backup, stop writers, kiểm tra plan và lease:
 $env:CHAOS_MIGRATION_APPLY = 'YES'
@@ -244,6 +253,27 @@ $env:CHAOS_MIGRATION_OFFLINE = 'YES'
 mongosh $env:MONGODB_URI --file .\Migrations\chaos-v1.mongosh.js
 Remove-Item Env:CHAOS_MIGRATION_APPLY, Env:CHAOS_MIGRATION_OFFLINE
 ```
+
+### Render build thành công nhưng startup báo legacy users
+
+Nếu log có `Legacy mode data remains in users`, Docker build/publish đã xong nhưng
+`ChaosMigrationGuard` phát hiện ít nhất một document có `ratings.aram` hoặc `onlineColors.aram`.
+Đây là bước chặn schema chưa migration ở Program trước mọi startup rating/index write.
+Log này chưa cho biết có dual-key conflict hay không; phải đọc kết quả plan để xác định.
+
+Không bỏ guard, tự bật apply trong startup hay chỉ sửa mỗi users: query leaderboard, ticket pool,
+room hash và match/event đang tồn tại đều phụ thuộc migration đầy đủ. Redeploy cùng dữ liệu cũ
+sẽ vẫn bị chặn. Làm lần lượt quy trình maintenance/backup/plan/apply/plan phía trên rồi deploy lại.
+Nếu cần quay về bản trước khi chuyển đổi dữ liệu, dùng backend/config trước tính năng Chaos/rank;
+nếu migration đã ghi một phần thì phải giữ writers dừng và hoàn tất hoặc restore full backup trước.
+Không chạy bản cũ trên database đã chuyển đổi dở hoặc đã chuyển sang Chaos.
+
+Nếu Compass trắng/treo sau khi dùng wrapper `eval` trong shell nhúng, ngừng chạy lại wrapper đó.
+Đóng/mở lại Compass; chỉ End task ứng dụng Compass nếu không đóng được. Không xóa cấu hình
+Compass hay collection để xử lý lỗi giao diện. Lời gọi plan mặc định `apply=false` không thực hiện
+migration writes; màn hình trắng tự nó không xác định được nguyên nhân hay trạng thái nếu người vận hành
+đã từng gọi apply. Cần lấy log Compass trước khi kết luận. Phiên bản script đọc cursor đã được kiểm tra
+cú pháp/source; chưa xác minh runtime trong Compass. Thay đổi này không chứng minh đã sửa lỗi giao diện.
 
 Phạm vi chuyển đổi theo schema thực tế:
 

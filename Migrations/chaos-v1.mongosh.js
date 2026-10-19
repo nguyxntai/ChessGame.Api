@@ -4,6 +4,12 @@ const crypto = require("crypto");
 const APPLY = process.env.CHAOS_MIGRATION_APPLY === "YES";
 const OFFLINE = process.env.CHAOS_MIGRATION_OFFLINE === "YES";
 const MIGRATION = "chaos-v1";
+// API DatabaseName can differ from the default database in its connection URI.
+// Require the operator to select the same database explicitly for both plan and apply.
+const targetDatabase = process.env.CHAOS_MIGRATION_DATABASE?.trim();
+if (!targetDatabase || ["admin", "config", "local"].includes(targetDatabase))
+    throw new Error("Set CHAOS_MIGRATION_DATABASE to the API MongoDb:DatabaseName before plan/apply.");
+const migrationDb = db.getSiblingDB(targetDatabase);
 const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 const copy = value => EJSON.parse(EJSON.stringify(value, { relaxed: false }), { relaxed: false });
 function stable(value) {
@@ -66,34 +72,65 @@ function transform(collection, doc) {
 }
 
 async function main() {
-    const lease = await db.online_leases.findOne({ _id: "runtime", ExpiresAt: { $gt: new Date() } });
+    const lease = await migrationDb.online_leases.findOne({ _id: "runtime", ExpiresAt: { $gt: new Date() } });
     if (APPLY && (!OFFLINE || lease)) throw new Error("Stop every API/worker and wait for runtime lease expiry; acknowledge OFFLINE=YES.");
     const changes = [], conflicts = [], totals = {}, queuedPools = new Set();
+    const markers = migrationDb.getCollection("schema_migrations"), backups = migrationDb.getCollection("_chaos_v1_backup");
+    let plannedBytes = 0, poolChanges = 0, conflictCount = 0;
+    const reportConflict = conflict => {
+        conflictCount++;
+        if (conflicts.length < 50) conflicts.push(conflict);
+    };
+    async function planChange(collection, original, after) {
+        const id = original?._id ?? after._id;
+        const key = collection + ":" + EJSON.stringify(id);
+        const prior = await backups.findOne({ _id: key });
+        if (prior && (prior.afterHash !== digest(after) || !equal(prior.original, original)))
+            reportConflict({ collection, id: EJSON.stringify(id), reason: "Backup journal conflicts; inspect before resuming" });
+        // A read-only plan retains counts, not copies of every document in the database.
+        if (!APPLY) return;
+        plannedBytes += 2 * (stable(original).length + stable(after).length);
+        if (plannedBytes > 32 * 1024 * 1024)
+            throw new Error("Apply plan exceeds the 32 MiB document budget. No migration writes made; use an offline batched migration procedure.");
+        changes.push({ collection, id, original, after });
+    }
+    printjson({ database: migrationDb.getName(), apply: APPLY, phase: "Preflight", batchSize: 25 });
     for (const collection of ["users", "online_matches", "online_rooms", "online_tickets", "online_events", "online_moves"]) {
         let scanned = 0, changed = 0;
-        const documents = await db.getCollection(collection).find().toArray();
-        for (const original of documents) {
-            scanned++;
-            try {
-                const after = transform(collection, copy(original));
+        const cursor = migrationDb.getCollection(collection).find().batchSize(25);
+        try {
+            while (await cursor.hasNext()) {
+                const original = await cursor.next();
+                scanned++;
+                let after;
+                try { after = transform(collection, copy(original)); }
+                catch (e) {
+                    reportConflict({ collection, id: EJSON.stringify(original._id), reason: e.message });
+                    continue;
+                }
                 if (collection === "online_tickets" && after.Status === "Queued") queuedPools.add(after.PoolKey);
-                if (!equal(original, after)) { changes.push({ collection, id: original._id, original, after }); changed++; }
-            } catch (e) { conflicts.push({ collection, id: EJSON.stringify(original._id), reason: e.message }); }
-        }
+                if (!equal(original, after)) { await planChange(collection, original, after); changed++; }
+                if (scanned % 250 === 0) printjson({ collection, scanned, changed, phase: "Preflight" });
+            }
+        } finally { await cursor.close(); }
         totals[collection] = { scanned, changed };
+        printjson({ collection, scanned, changed, phase: "CollectionComplete" });
     }
     // Pools are derived cursors, not player data. Rebuild their canonical keys, resetting fairness cursors.
-    const pools = await db.online_queue_pools.find().toArray();
     const desired = new Map([...queuedPools].map(key => [key, { _id: key, LastServedAt: new Date(0), CursorAt: new Date(0), CursorId: "" }]));
-    for (const original of pools) {
-        const after = desired.get(original._id) ?? null;
-        if (!equal(original, after)) changes.push({ collection: "online_queue_pools", id: original._id, original, after });
-        desired.delete(original._id);
-    }
-    for (const after of desired.values()) changes.push({ collection: "online_queue_pools", id: after._id, original: null, after });
+    const poolCursor = migrationDb.online_queue_pools.find().batchSize(25);
+    try {
+        while (await poolCursor.hasNext()) {
+            const original = await poolCursor.next();
+            const after = desired.get(original._id) ?? null;
+            if (!equal(original, after)) { await planChange("online_queue_pools", original, after); poolChanges++; }
+            desired.delete(original._id);
+        }
+    } finally { await poolCursor.close(); }
+    for (const after of desired.values()) { await planChange("online_queue_pools", null, after); poolChanges++; }
 
     let indexes;
-    try { indexes = await db.users.getIndexes(); }
+    try { indexes = await migrationDb.users.getIndexes(); }
     catch (e) { if (e.code === 26) indexes = []; else throw e; }
     const newIndexes = [
         { name: "idx_users_leaderboard_chaos", key: { isActive: 1, "ratings.chaos.rating": -1, _id: 1 } },
@@ -104,30 +141,24 @@ async function main() {
         const existing = indexes.find(i => i.name === spec.name);
         if (existing && (existing.unique || existing.sparse || JSON.stringify(existing.key) !== JSON.stringify(spec.key) ||
             !equal(existing.partialFilterExpression ?? null, spec.partialFilterExpression ?? null)))
-            conflicts.push({ collection: "users", id: spec.name, reason: "Canonical index has different definition" });
+            reportConflict({ collection: "users", id: spec.name, reason: "Canonical index has different definition" });
     }
     const legacyIndexes = indexes.filter(i => ["idx_users_leaderboard_aram", "idx_users_established_aram"].includes(i.name));
     for (const index of legacyIndexes) {
         const partial = index.name === "idx_users_established_aram" ? { "ratings.aram.ratedGames": { $gte: 10 } } : null;
         if (index.unique || index.sparse || JSON.stringify(index.key) !== JSON.stringify({ isActive: 1, "ratings.aram.rating": -1, _id: 1 }) ||
             !equal(index.partialFilterExpression ?? null, partial))
-            conflicts.push({ collection: "users", id: index.name, reason: "Legacy index has unexpected definition; preserve and inspect" });
+            reportConflict({ collection: "users", id: index.name, reason: "Legacy index has unexpected definition; preserve and inspect" });
     }
-    const markers = db.getCollection("schema_migrations"), backups = db.getCollection("_chaos_v1_backup");
-    for (const change of changes) {
-        const key = change.collection + ":" + EJSON.stringify(change.id);
-        const prior = await backups.findOne({ _id: key });
-        if (prior && (prior.afterHash !== digest(change.after) || !equal(prior.original, change.original)))
-            conflicts.push({ collection: change.collection, id: EJSON.stringify(change.id), reason: "Backup journal conflicts; inspect before resuming" });
-    }
-    printjson({ database: db.getName(), apply: APPLY, totals, poolChanges: changes.filter(c => c.collection === "online_queue_pools").length,
-        createIndexes: newIndexes.map(i => i.name), dropIndexes: legacyIndexes.map(i => i.name), conflicts });
-    if (conflicts.length) throw new Error("Preflight failed; no migration writes made. Resolve each conflict from evidence, then rerun.");
+    printjson({ database: migrationDb.getName(), apply: APPLY, totals, poolChanges,
+        createIndexes: newIndexes.map(i => i.name), dropIndexes: legacyIndexes.map(i => i.name), conflictCount,
+        conflictsTruncated: conflictCount > conflicts.length, conflicts });
+    if (conflictCount) throw new Error("Preflight failed; no migration writes made. Resolve conflicts from evidence, then rerun (first 50 shown).");
     if (!APPLY) { print("READ-ONLY PLAN. No writes. Back up the full database before offline apply."); return; }
 
     await markers.updateOne({ _id: MIGRATION }, { $set: { status: "Running", startedAt: new Date() } }, { upsert: true, writeConcern: { w: "majority" } });
     for (const change of changes) {
-        const collection = db.getCollection(change.collection);
+        const collection = migrationDb.getCollection(change.collection);
         const key = change.collection + ":" + EJSON.stringify(change.id);
         const afterHash = digest(change.after);
         const priorBackup = await backups.findOne({ _id: key });
@@ -148,9 +179,9 @@ async function main() {
     }
     for (const spec of newIndexes) {
         const { key, ...options } = spec;
-        await db.users.createIndex(key, options);
+        await migrationDb.users.createIndex(key, options);
     }
-    for (const index of legacyIndexes) await db.users.dropIndex(index.name);
+    for (const index of legacyIndexes) await migrationDb.users.dropIndex(index.name);
     await markers.updateOne({ _id: MIGRATION }, { $set: { status: "Completed", completedAt: new Date() } }, { writeConcern: { w: "majority" } });
     print("Completed. Keep API offline, rerun read-only plan, and verify against the backup before rollout.");
 }

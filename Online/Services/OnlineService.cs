@@ -18,7 +18,7 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ch
     private static TicketSnapshot Ticket(OnlineTicket t) => new(t.Id, t.Status, t.Settings, t.CreatedAt, t.ExpiresAt, t.MatchId);
     private static RoomSnapshot Room(OnlineRoom r) => new(r.Id, r.Code, r.OwnerId, r.Members, r.Settings, r.Status, r.MatchId, r.ExpiresAt);
     private static PlayerSnapshot Player(MatchPlayer p) => new(p.UserId, p.Username, p.DisplayName, p.Color, p.Rating,
-        p.Ready, p.Connected, p.ReconnectDeadline, p.Loadout, p.Accepted);
+        p.Ready, p.Connected, p.ReconnectDeadline, p.Loadout, p.Accepted, p.AvatarId, p.Rank);
     private static MatchSummary Summary(OnlineMatch m) => new(m.Id, m.Status, m.Settings, m.Players.Select(Player).ToList(),
         m.CreatedAt, m.StartedAt, m.FinishedAt, m.Result, m.Rated);
     private static double Elapsed(OnlineMatch m, DateTime now) => m.ClockStartedAt is null ? 0 : Math.Max(0, (now - m.ClockStartedAt.Value).TotalMilliseconds);
@@ -186,6 +186,7 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ch
             var user = id == first.Id.ToString() ? first : second;
             bool connected = await store.Connections.Find(s, x => x.UserId == id && x.ExpiresAt > now).AnyAsync(ct);
             m.Players.Add(new MatchPlayer { UserId = id, Username = user.Username, DisplayName = user.Profile.DisplayName,
+                AvatarId = user.Profile.AvatarId, Rank = ranks.Profile(settings.Mode, user.Ratings.For(settings.Mode)),
                 Color = m.Players.Count == 0 ? "White" : "Black", Rating = RatingPolicies.Display(user.Ratings.For(settings.Mode).Rating), Connected = connected, Accepted = !rated, Loadout = await Loadout(s, user, ct) });
             await store.Seats.ReplaceOneAsync(s, x => x.UserId == id, new OnlineSeat { UserId = id, Kind = "Match", ReferenceId = m.Id },
                 new ReplaceOptions { IsUpsert = true }, ct);

@@ -7,6 +7,8 @@ public sealed class MatchPlayer
     public string DisplayName { get; set; } = "";
     public string Color { get; set; } = "";
     public int Rating { get; set; }
+    public string? AvatarId { get; set; }
+    public ChessGame.Api.Services.Ranks.RankProfile? Rank { get; set; }
     public bool Ready { get; set; }
     public bool Accepted { get; set; }
     public bool Connected { get; set; }
