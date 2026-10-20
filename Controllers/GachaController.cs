@@ -13,10 +13,12 @@ namespace ChessGame.Api.Controllers;
 public sealed class GachaController : ControllerBase
 {
     private readonly GachaService _gacha;
+    private readonly ILogger<GachaController> _logger;
 
-    public GachaController(GachaService gacha)
+    public GachaController(GachaService gacha, ILogger<GachaController> logger)
     {
         _gacha = gacha;
+        _logger = logger;
     }
 
     [HttpGet("banners")]
@@ -94,6 +96,46 @@ public sealed class GachaController : ControllerBase
         }
     }
 
+    [Authorize]
+    [HttpGet("rolls/by-request/{requestId}")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public async Task<IActionResult> GetRollByRequest(
+        string requestId,
+        [FromQuery] string? bannerCode = null,
+        [FromQuery] int? count = null,
+        CancellationToken cancellationToken = default)
+    {
+        var userId = CurrentUserId();
+        if (userId is null)
+            return Unauthorized(new { code = "INVALID_TOKEN_USER" });
+        if (!Guid.TryParse(requestId, out var id) || id == Guid.Empty)
+            return BadRequest(new { code = "INVALID_RECOVERY_REQUEST" });
+
+        var query = Request.Query;
+        var hasBanner = query.ContainsKey("bannerCode");
+        var hasCount = query.ContainsKey("count");
+        if (hasBanner != hasCount || (hasBanner
+            && (query["bannerCode"].Count != 1 || query["count"].Count != 1
+                || string.IsNullOrWhiteSpace(bannerCode) || count is null)))
+            return BadRequest(new { code = "INVALID_RECOVERY_REQUEST" });
+
+        try
+        {
+            return Ok(await _gacha.GetRollByRequestAsync(
+                userId.Value, id, bannerCode, count, cancellationToken));
+        }
+        catch (GachaException ex)
+        {
+            return Error(ex);
+        }
+        catch (Exception ex)
+        {
+            // No exception message/connection details or claim of noncommit in the response.
+            _logger.LogWarning("Gacha recovery read unavailable ({FailureType})", ex.GetType().Name);
+            return StatusCode(503, new { code = "RECOVERY_UNAVAILABLE" });
+        }
+    }
+
     private ObjectId? CurrentUserId()
     {
         var raw = User.FindFirstValue(JwtRegisteredClaimNames.Sub)
@@ -105,8 +147,8 @@ public sealed class GachaController : ControllerBase
     {
         var status = ex.Code switch
         {
-            "INVALID_BANNER_CODE" or "INVALID_ROLL_REQUEST" or "INVALID_PAGE" => 400,
-            "BANNER_NOT_FOUND" or "USER_NOT_FOUND" => 404,
+            "INVALID_BANNER_CODE" or "INVALID_ROLL_REQUEST" or "INVALID_PAGE" or "INVALID_RECOVERY_REQUEST" => 400,
+            "BANNER_NOT_FOUND" or "USER_NOT_FOUND" or "NOT_OBSERVED" => 404,
             "ACCOUNT_DISABLED" => 403,
             "INSUFFICIENT_CURRENCY" or "REQUEST_ID_CONFLICT" => 409,
             "BANNER_MISCONFIGURED" or "PITY_STATE_INVALID" or "WALLET_OVERFLOW" or "ROLL_BUSY" => 503,
