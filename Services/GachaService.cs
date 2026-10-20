@@ -138,6 +138,32 @@ public sealed class GachaService
         };
     }
 
+    // A read-only reconciliation primitive. Absence is not proof of noncommit.
+    public async Task<GachaRollResponse> GetRollByRequestAsync(
+        ObjectId userId, Guid requestId, string? bannerCode = null, int? count = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (requestId == Guid.Empty || (bannerCode is null) != (count is null)
+            || (count.HasValue && count is not (1 or 10)))
+            throw new GachaException("INVALID_RECOVERY_REQUEST");
+        var code = bannerCode is null ? null : NormalizeCode(bannerCode);
+
+        // Match the established account policy of gacha GET history/pity.
+        await EnsureActiveUserAsync(userId, cancellationToken);
+        var canonicalId = requestId.ToString("D");
+        // Collection-scoped consistency only; no global settings, session or transaction.
+        // Never downgrade read errors to an absent row or fall back to a roll/catalog.
+        var previous = await _rolls.WithReadConcern(ReadConcern.Majority)
+            .WithReadPreference(ReadPreference.Primary)
+            .Find(x => x.UserId == userId && x.RequestId == canonicalId)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (previous is null)
+            throw new GachaException("NOT_OBSERVED");
+        return code is null
+            ? ToRollResponse(previous)
+            : ReplayOrConflict(previous, code, count!.Value);
+    }
+
     public async Task<GachaRollResponse> RollAsync(ObjectId userId, GachaRollRequest request)
     {
         if (request.Count is not (1 or 10) || request.RequestId == Guid.Empty)
@@ -399,9 +425,10 @@ public sealed class GachaService
         }
     }
 
-    private async Task EnsureActiveUserAsync(ObjectId userId)
+    private async Task EnsureActiveUserAsync(
+        ObjectId userId, CancellationToken cancellationToken = default)
     {
-        var user = await _users.Find(x => x.Id == userId).FirstOrDefaultAsync();
+        var user = await _users.Find(x => x.Id == userId).FirstOrDefaultAsync(cancellationToken);
         if (user is null)
             throw new GachaException("USER_NOT_FOUND");
         if (!user.IsActive)
