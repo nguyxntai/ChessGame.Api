@@ -92,6 +92,7 @@ public sealed class GachaRollResponse
     public long TotalCost { get; set; }
     public GachaWalletResponse Wallet { get; set; } = new();
     public List<GachaRewardResponse> Results { get; set; } = new();
+    public GachaPresentationSnapshotResponse? PresentationSnapshot { get; set; }
     public GachaPityResponse Pity { get; set; } = new();
     public DateTime CreatedAt { get; set; }
 }
@@ -101,6 +102,23 @@ public sealed class GachaWalletResponse
     public long Golds { get; set; }
     public long Diamonds { get; set; }
     public long Tickets { get; set; }
+}
+
+public sealed class GachaPresentationSnapshotResponse
+{
+    public int SchemaVersion { get; set; }
+    public string MetadataSource { get; set; } = string.Empty;
+    public string? CatalogVersion { get; set; }
+    public List<GachaRewardMetadataResponse> Rewards { get; set; } = new();
+}
+
+public sealed class GachaRewardMetadataResponse
+{
+    public int SlotIndex { get; set; }
+    public string ItemId { get; set; } = string.Empty;
+    public string? ItemCode { get; set; }
+    public string? RawItemType { get; set; }
+    public string? UnityAssetKey { get; set; }
 }
 
 public sealed class GachaRewardResponse
