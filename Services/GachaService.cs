@@ -237,6 +237,7 @@ public sealed class GachaService
                 throw new GachaException("PITY_STATE_INVALID");
 
             var results = new List<GachaRollReward>(count);
+            var metadata = new List<GachaRewardMetadataSnapshot>(count);
             var ledger = new List<CurrencyTransaction>
             {
                 new()
@@ -299,6 +300,11 @@ public sealed class GachaService
                     DuplicateReward = payout
                 });
 
+                // Copy raw values from the SAME session-loaded item used for this grant.
+                // This is observation provenance, not item-category or artwork authority.
+                metadata.Add(new GachaRewardMetadataSnapshot(
+                    i, item.Id, item.Code, item.Type, item.UnityAssetKey));
+
                 (epic, legendary) = GachaDrawEngine.Advance(epic, legendary, rarity);
             }
 
@@ -357,6 +363,7 @@ public sealed class GachaService
                     Tickets = walletAfter.Wallet.Tickets
                 },
                 Results = results,
+                PresentationSnapshot = new GachaPresentationSnapshot(metadata),
                 PityAfter = new GachaPitySnapshot
                 {
                     Epic = epic,
@@ -628,6 +635,7 @@ public sealed class GachaService
                     Amount = x.DuplicateReward.Amount
                 }
         }).ToList(),
+        PresentationSnapshot = GachaPresentationMapping.ToResponse(roll),
         Pity = ToPityResponse(
             roll.PityAfter.Epic, roll.PityAfter.Legendary, roll.PityLimit),
         CreatedAt = roll.CreatedAt

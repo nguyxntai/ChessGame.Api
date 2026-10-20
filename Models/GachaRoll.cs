@@ -36,6 +36,11 @@ public sealed class GachaRoll
     [BsonElement("results")]
     public List<GachaRollReward> Results { get; set; } = new();
 
+    [BsonElement("presentationSnapshot")]
+    [BsonIgnoreIfNull]
+    [BsonSerializer(typeof(GachaPresentationSnapshotSerializer))]
+    public GachaPresentationSnapshot? PresentationSnapshot { get; init; }
+
     [BsonElement("pityAfter")]
     public GachaPitySnapshot PityAfter { get; set; } = new();
 
