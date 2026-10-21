@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Diagnostics;
 using ChessGame.Api.DTOs.Gacha;
 using ChessGame.Api.Models;
 using MongoDB.Bson;
@@ -164,7 +165,11 @@ public sealed class GachaService
             : ReplayOrConflict(previous, code, count!.Value);
     }
 
-    public async Task<GachaRollResponse> RollAsync(ObjectId userId, GachaRollRequest request)
+    public Task<GachaRollResponse> RollAsync(ObjectId userId, GachaRollRequest request) =>
+        RollAsync(userId, request, CancellationToken.None);
+
+    public async Task<GachaRollResponse> RollAsync(
+        ObjectId userId, GachaRollRequest request, CancellationToken cancellationToken)
     {
         if (request.Count is not (1 or 10) || request.RequestId == Guid.Empty)
             throw new GachaException("INVALID_ROLL_REQUEST");
@@ -174,22 +179,23 @@ public sealed class GachaService
 
         for (var attempt = 0; attempt < 5; attempt++)
         {
-            var existing = await FindRollAsync(userId, requestId);
+            cancellationToken.ThrowIfCancellationRequested();
+            var existing = await FindRollAsync(userId, requestId, cancellationToken);
             if (existing is not null)
                 return ReplayOrConflict(existing, code, request.Count);
 
             try
             {
-                return await RollOnceAsync(userId, code, request.Count, requestId);
+                return await RollOnceAsync(userId, code, request.Count, requestId, cancellationToken);
             }
             catch (Exception ex) when (IsRetryable(ex))
             {
-                existing = await FindRollAsync(userId, requestId);
+                existing = await FindRollAsync(userId, requestId, cancellationToken);
                 if (existing is not null)
                     return ReplayOrConflict(existing, code, request.Count);
                 if (attempt == 4)
                     throw new GachaException("ROLL_BUSY");
-                await Task.Delay(10 * (attempt + 1));
+                await Task.Delay(10 * (attempt + 1), cancellationToken);
             }
         }
 
@@ -197,19 +203,20 @@ public sealed class GachaService
     }
 
     private async Task<GachaRollResponse> RollOnceAsync(
-        ObjectId userId, string code, int count, string requestId)
+        ObjectId userId, string code, int count, string requestId, CancellationToken cancellationToken)
     {
-        using var session = await _client.StartSessionAsync();
+        using var session = await _client.StartSessionAsync(cancellationToken: cancellationToken);
         session.StartTransaction();
+        var commitStarted = false;
 
         try
         {
             var previous = await _rolls
                 .Find(session, x => x.UserId == userId && x.RequestId == requestId)
-                .FirstOrDefaultAsync();
+                .FirstOrDefaultAsync(cancellationToken);
             if (previous is not null)
             {
-                await session.AbortTransactionAsync();
+                await session.AbortTransactionAsync(cancellationToken);
                 return ReplayOrConflict(previous, code, count);
             }
 
@@ -217,11 +224,11 @@ public sealed class GachaService
             var banner = await _banners.Find(session,
                     Builders<GachaBanner>.Filter.Eq(x => x.Code, code)
                     & ActiveBannerFilter(now))
-                .FirstOrDefaultAsync();
+                .FirstOrDefaultAsync(cancellationToken);
             if (banner is null)
                 throw new GachaException("BANNER_NOT_FOUND");
 
-            var pool = await LoadAndValidatePoolAsync(banner, session);
+            var pool = await LoadAndValidatePoolAsync(banner, session, cancellationToken);
             var cost = banner.Costs.SingleOrDefault(x => x.RollCount == count);
             if (cost is null)
                 throw new GachaException("INVALID_ROLL_REQUEST");
@@ -231,7 +238,7 @@ public sealed class GachaService
             var pityGroup = NormalizePityGroup(banner.PityGroup);
 
             var user = await _users.Find(session, x => x.Id == userId)
-                .FirstOrDefaultAsync();
+                .FirstOrDefaultAsync(cancellationToken);
             if (user is null)
                 throw new GachaException("USER_NOT_FOUND");
             if (!user.IsActive)
@@ -249,13 +256,13 @@ public sealed class GachaService
                 new FindOneAndUpdateOptions<User>
                 {
                     ReturnDocument = ReturnDocument.After
-                });
+                }, cancellationToken);
             if (walletAfter is null)
                 throw new InvalidOperationException("WALLET_CONFLICT");
 
             var state = await _pity
                 .Find(session, x => x.UserId == userId && x.PityGroup == pityGroup)
-                .FirstOrDefaultAsync();
+                .FirstOrDefaultAsync(cancellationToken);
             var epic = state?.EpicCurrent ?? 0;
             var legendary = state?.LegendaryCurrent ?? 0;
             if (epic < 0 || epic >= banner.Pity.Epic
@@ -286,8 +293,10 @@ public sealed class GachaService
                     pool.Rates, banner.Pity, epic, legendary,
                     RandomNumberGenerator.GetInt32(pool.Rates.Total));
                 var item = ChooseItem(banner, pool.Items, rarity);
+                cancellationToken.ThrowIfCancellationRequested();
                 var isDuplicate = await _inventory.GrantGachaItemAsync(
                     session, userId, item.Id, now);
+                cancellationToken.ThrowIfCancellationRequested();
                 GachaDuplicateReward? payout = null;
 
                 if (isDuplicate)
@@ -342,7 +351,7 @@ public sealed class GachaService
                 var creditResult = await _users.UpdateOneAsync(
                     session,
                     x => x.Id == userId,
-                    Builders<User>.Update.Combine(updates));
+                    Builders<User>.Update.Combine(updates), cancellationToken: cancellationToken);
                 if (creditResult.MatchedCount != 1)
                     throw new InvalidOperationException("WALLET_CONFLICT");
             }
@@ -357,7 +366,7 @@ public sealed class GachaService
                     LegendaryCurrent = legendary,
                     Version = 1,
                     UpdatedAt = now
-                });
+                }, cancellationToken: cancellationToken);
             }
             else
             {
@@ -368,7 +377,7 @@ public sealed class GachaService
                         .Set(x => x.EpicCurrent, epic)
                         .Set(x => x.LegendaryCurrent, legendary)
                         .Set(x => x.UpdatedAt, now)
-                        .Inc(x => x.Version, 1));
+                        .Inc(x => x.Version, 1), cancellationToken: cancellationToken);
                 if (updated.MatchedCount != 1)
                     throw new InvalidOperationException("PITY_CONFLICT");
             }
@@ -403,25 +412,113 @@ public sealed class GachaService
                 CreatedAt = now
             };
 
-            await _rolls.InsertOneAsync(session, roll);
-            await _transactions.InsertManyAsync(session, ledger);
-            await session.CommitTransactionAsync();
-            return ToRollResponse(roll);
+            await _rolls.InsertOneAsync(session, roll, cancellationToken: cancellationToken);
+            await _transactions.InsertManyAsync(session, ledger, cancellationToken: cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            commitStarted = true;
+            return await CommitOriginalAsync(session, roll, cancellationToken);
         }
-        catch
+        catch (Exception original)
         {
-            if (session.IsInTransaction)
+            // After dispatch, IsInTransaction is not an authority on server outcome.
+            // CommitOriginalAsync owns resolution; never abort an unknown commit here.
+            if (!commitStarted && session.IsInTransaction)
             {
+                using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(2));
                 try
                 {
-                    await session.AbortTransactionAsync();
+                    await session.AbortTransactionAsync(cleanup.Token);
                 }
-                catch (MongoException)
+                catch (Exception abort) when (abort is MongoException or OperationCanceledException or TimeoutException)
                 {
-                    // Preserve the original error; commit status may be unknown.
+                    // Do not authorize a new body when abort could not be confirmed.
+                    throw new InvalidOperationException("Transaction abort could not be confirmed.",
+                        new AggregateException(original, abort));
                 }
             }
             throw;
+        }
+    }
+
+    private async Task<GachaRollResponse> CommitOriginalAsync(
+        IClientSessionHandle session, GachaRoll candidate, CancellationToken cancellationToken)
+    {
+        var budget = TimeSpan.FromSeconds(5);
+        var clock = Stopwatch.StartNew();
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(budget);
+        Exception? lastFailure = null;
+        var unknown = false;
+
+        for (var attempt = 0; attempt < 8; attempt++)
+        {
+            try
+            {
+                deadline.Token.ThrowIfCancellationRequested();
+                // MongoDB.Driver 3.12 permits recommit in its Committed state and
+                // escalates write concern, retaining the same lsid and txnNumber.
+                await session.CommitTransactionAsync(deadline.Token);
+                return ToRollResponse(candidate);
+            }
+            catch (Exception ex) when (ex is MongoException or OperationCanceledException or TimeoutException)
+            {
+                if (!unknown && ex is MongoCommandException command
+                    && !command.HasErrorLabel("UnknownTransactionCommitResult"))
+                    throw; // Definitive command failure; existing Transient policy may apply.
+
+                unknown = true;
+                lastFailure = ex;
+            }
+
+            if (deadline.IsCancellationRequested || clock.Elapsed >= budget)
+                break;
+
+            try
+            {
+                var observed = await _rolls.WithReadConcern(ReadConcern.Majority)
+                    .WithReadPreference(ReadPreference.Primary)
+                    .Find(x => x.UserId == candidate.UserId && x.RequestId == candidate.RequestId)
+                    .FirstOrDefaultAsync(deadline.Token);
+                if (observed is not null)
+                    return ReplayOrConflict(observed, candidate.BannerCode, candidate.Count);
+            }
+            catch (Exception ex) when (ex is MongoException or OperationCanceledException or TimeoutException)
+            {
+                lastFailure = ex; // A failed read is never evidence of noncommit.
+            }
+
+            if (attempt == 7 || deadline.IsCancellationRequested || clock.Elapsed >= budget)
+                break;
+            try
+            {
+                await Task.Delay(Math.Min(50 * (1 << Math.Min(attempt, 3)), 250), deadline.Token);
+            }
+            catch (OperationCanceledException ex)
+            {
+                lastFailure = ex;
+                break;
+            }
+        }
+
+        // Keep uncertainty distinct from retryable transaction-body failures.
+        // The POST controller maps this typed outcome using the original correlation.
+        throw new CommitOutcomeUnknownException(candidate, lastFailure);
+    }
+
+    internal sealed class CommitOutcomeUnknownException : Exception
+    {
+        public ObjectId UserId { get; }
+        public string RequestId { get; }
+        public string BannerCode { get; }
+        public int Count { get; }
+
+        public CommitOutcomeUnknownException(GachaRoll candidate, Exception? cause)
+            : base("Commit outcome unresolved; recover using the original account and RequestId.", cause)
+        {
+            UserId = candidate.UserId;
+            RequestId = candidate.RequestId;
+            BannerCode = candidate.BannerCode;
+            Count = candidate.Count;
         }
     }
 
@@ -435,9 +532,10 @@ public sealed class GachaService
             throw new GachaException("ACCOUNT_DISABLED");
     }
 
-    private async Task<GachaRoll?> FindRollAsync(ObjectId userId, string requestId) =>
+    private async Task<GachaRoll?> FindRollAsync(
+        ObjectId userId, string requestId, CancellationToken cancellationToken) =>
         await _rolls.Find(x => x.UserId == userId && x.RequestId == requestId)
-            .FirstOrDefaultAsync();
+            .FirstOrDefaultAsync(cancellationToken);
 
     private static GachaRollResponse ReplayOrConflict(
         GachaRoll previous, string code, int count)
@@ -448,7 +546,7 @@ public sealed class GachaService
     }
 
     private async Task<PoolContext> LoadAndValidatePoolAsync(
-        GachaBanner banner, IClientSessionHandle? session)
+        GachaBanner banner, IClientSessionHandle? session, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(banner.PityGroup)
             || banner.Pity.Epic <= 0 || banner.Pity.Legendary <= 0
@@ -467,8 +565,8 @@ public sealed class GachaService
         var ids = banner.Pool.Select(x => x.ItemId).ToList();
         var filter = Builders<Item>.Filter.In(x => x.Id, ids);
         var items = session is null
-            ? await _items.Find(filter).ToListAsync()
-            : await _items.Find(session, filter).ToListAsync();
+            ? await _items.Find(filter).ToListAsync(cancellationToken)
+            : await _items.Find(session, filter).ToListAsync(cancellationToken);
         var byId = items.ToDictionary(x => x.Id);
 
         if (byId.Count != ids.Count || items.Any(x => !x.IsActive || x.IsDefault
@@ -679,8 +777,8 @@ public sealed class GachaService
         if (ex is MongoCommandException command && command.Code == 11000)
             return true;
         return ex is MongoException mongo
-            && (mongo.HasErrorLabel("TransientTransactionError")
-                || mongo.HasErrorLabel("UnknownTransactionCommitResult"));
+            && mongo.HasErrorLabel("TransientTransactionError")
+            && !mongo.HasErrorLabel("UnknownTransactionCommitResult");
     }
 
     public async Task EnsureIndexesAsync()
