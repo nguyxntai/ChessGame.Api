@@ -48,9 +48,38 @@ public sealed class GachaController : ControllerBase
         if (userId is null)
             return Unauthorized(new { code = "INVALID_TOKEN_USER" });
 
+        var originalRequestId = request.RequestId;
+        var originalBannerCode = request.BannerCode?.Trim().ToUpperInvariant();
+        var originalCount = request.Count;
+
         try
         {
             return Ok(await _gacha.RollAsync(userId.Value, request));
+        }
+        catch (GachaService.CommitOutcomeUnknownException ex)
+        {
+            Response.Headers.CacheControl = "no-store, no-cache";
+            Response.Headers.Pragma = "no-cache";
+            Response.Headers.Remove("Retry-After");
+
+            if (originalRequestId == Guid.Empty || ex.UserId != userId.Value
+                || !string.Equals(ex.RequestId, originalRequestId.ToString("D"), StringComparison.Ordinal)
+                || !string.Equals(ex.BannerCode, originalBannerCode, StringComparison.Ordinal)
+                || ex.Count != originalCount)
+            {
+                // Do not log the exception, account, receipt or transaction identifiers.
+                _logger.LogError(new EventId(3201, "GachaUnknownCorrelationMismatch"),
+                    "Gacha UNKNOWN outcome correlation validation failed.");
+                return StatusCode(500, new { code = "GACHA_OUTCOME_UNAVAILABLE" });
+            }
+
+            return StatusCode(503, new
+            {
+                code = "COMMIT_OUTCOME_UNKNOWN",
+                outcome = "UNKNOWN",
+                requestId = originalRequestId.ToString("D"),
+                recovery = "RECOVER_ORIGINAL_REQUEST_ID"
+            });
         }
         catch (GachaException ex)
         {
