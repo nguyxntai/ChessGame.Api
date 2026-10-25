@@ -23,4 +23,7 @@ public class InventoryItemResponse
     public string AcquiredSource { get; set; } = string.Empty;
 
     public DateTime AcquiredAt { get; set; }
+
+    public ChessGame.Api.DTOs.Presentation.ItemPresentationAuthorityResponse PresentationAuthority =>
+        ChessGame.Api.Services.ItemPresentationPolicy.Current.ResolveLive(ItemId, Type, UnityAssetKey);
 }

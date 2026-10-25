@@ -69,6 +69,9 @@ public sealed class GachaPoolItemResponse
     public string Rarity { get; set; } = string.Empty;
     public string UnityAssetKey { get; set; } = string.Empty;
     public int Weight { get; set; }
+
+    public ChessGame.Api.DTOs.Presentation.ItemPresentationAuthorityResponse PresentationAuthority =>
+        ChessGame.Api.Services.ItemPresentationPolicy.Current.ResolveLive(ItemId, Type, UnityAssetKey);
 }
 
 public sealed class GachaPityResponse
@@ -119,6 +122,9 @@ public sealed class GachaRewardMetadataResponse
     public string? ItemCode { get; set; }
     public string? RawItemType { get; set; }
     public string? UnityAssetKey { get; set; }
+
+    public ChessGame.Api.DTOs.Presentation.ItemPresentationAuthorityResponse PresentationAuthority =>
+        ChessGame.Api.Services.ItemPresentationPolicy.ForV1Receipt(ItemId);
 }
 
 public sealed class GachaRewardResponse

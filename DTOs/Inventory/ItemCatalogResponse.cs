@@ -17,4 +17,7 @@ public class ItemCatalogResponse
     public bool IsDefault { get; set; }
 
     public bool IsActive { get; set; }
+
+    public ChessGame.Api.DTOs.Presentation.ItemPresentationAuthorityResponse PresentationAuthority =>
+        ChessGame.Api.Services.ItemPresentationPolicy.Current.ResolveLive(ItemId, Type, UnityAssetKey);
 }
