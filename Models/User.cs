@@ -92,9 +92,21 @@ public class PlayerStats
 
 public class EquippedSkins
 {
+    [BsonElement("pieceMode")]
+    public string PieceMode { get; set; } = "SET";
+
+    [BsonElement("pieces")]
+    public List<EquippedPiece> Pieces { get; set; } = new();
+
     [BsonElement("chessSkinId")]
     public ObjectId? ChessSkinId { get; set; }
 
     [BsonElement("boardSkinId")]
     public ObjectId? BoardSkinId { get; set; }
+}
+
+public class EquippedPiece
+{
+    [BsonElement("slot")] public string Slot { get; set; } = "";
+    [BsonElement("itemId")] public ObjectId ItemId { get; set; }
 }

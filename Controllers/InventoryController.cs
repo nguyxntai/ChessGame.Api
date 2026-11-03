@@ -62,11 +62,7 @@ public class InventoryController : ControllerBase
             {
                 Success = true,
                 Message = "Trang bị vật phẩm thành công.",
-                Equipped = new EquippedSkinsResponse
-                {
-                    ChessSkinId = equippedSkins.ChessSkinId?.ToString(),
-                    BoardSkinId = equippedSkins.BoardSkinId?.ToString()
-                }
+                Equipped = EquippedSkinsResponse.From(equippedSkins)
             };
 
             return Ok(response);
@@ -82,6 +78,20 @@ public class InventoryController : ControllerBase
                 _ => StatusCode(StatusCodes.Status500InternalServerError, new { message = ex.Message })
             };
         }
+    }
+
+    [Authorize]
+    [HttpPut("loadout")]
+    public async Task<IActionResult> EquipLoadout([FromBody] EquipLoadoutRequest request)
+    {
+        if (!TryGetUserId(out var userId, out var error)) return error;
+        try
+        {
+            var equipped = await _inventoryService.EquipLoadoutAsync(userId, request);
+            return Ok(new EquipItemResponse { Success = true, Message = "Loadout saved.", Equipped = EquippedSkinsResponse.From(equipped) });
+        }
+        catch (InvalidOperationException ex) when (ex.Message is "INVALID_LOADOUT" or "ITEM_NOT_FOUND" or "ITEM_NOT_OWNED" or "ITEM_NOT_EQUIPPABLE" or "USER_NOT_FOUND")
+        { return BadRequest(new { code = ex.Message, message = "Loadout could not be equipped. Refresh your inventory." }); }
     }
 
     private bool TryGetUserId(out ObjectId userId, out IActionResult errorResult)

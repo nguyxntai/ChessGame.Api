@@ -160,14 +160,13 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ch
     private async Task<List<LoadoutSnapshot>> Loadout(IClientSessionHandle s, User user, CancellationToken ct)
     {
         var result = new List<LoadoutSnapshot>();
-        foreach (var entry in new[] { (Id: user.Equipped.ChessSkinId, Type: "CHESS"), (Id: user.Equipped.BoardSkinId, Type: "BOARD") })
+        foreach (var entry in ChessGame.Api.Services.CosmeticLoadoutPolicy.References(user.Equipped))
         {
-            if (entry.Id is null) continue;
-            var item = await store.Items.Find(s, x => x.Id == entry.Id.Value && x.IsActive).FirstOrDefaultAsync(ct);
-            if (item is null || !item.Type.Contains(entry.Type, StringComparison.OrdinalIgnoreCase) ||
-                !await store.PlayerItems.Find(s, x => x.UserId == user.Id && x.ItemId == entry.Id.Value).AnyAsync(ct))
+            var item = await store.Items.Find(s, x => x.Id == entry.Id && x.IsActive).FirstOrDefaultAsync(ct);
+            if (item is null || !ChessGame.Api.Services.CosmeticLoadoutPolicy.Fits(item.Type, entry.Slot) ||
+                !await store.PlayerItems.Find(s, x => x.UserId == user.Id && x.ItemId == entry.Id).AnyAsync(ct))
                 throw new OnlineException("InvalidLoadout");
-            result.Add(new(item.Id.ToString(), item.Code, item.UnityAssetKey, item.Type));
+            result.Add(new(item.Id.ToString(), item.Code, item.UnityAssetKey, item.Type, entry.Slot));
         }
         return result;
     }

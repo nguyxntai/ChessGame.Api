@@ -48,8 +48,7 @@ public class InventoryService
         {
             if (itemsDict.TryGetValue(pi.ItemId, out var item))
             {
-                bool isEquipped = (equippedChessId.HasValue && equippedChessId.Value == item.Id) ||
-                                 (equippedBoardId.HasValue && equippedBoardId.Value == item.Id);
+                bool isEquipped = user?.Equipped != null && CosmeticLoadoutPolicy.References(user.Equipped).Any(x => x.Id == item.Id);
 
                 result.Add(new InventoryItemResponse
                 {
@@ -118,14 +117,21 @@ public class InventoryService
 
         var equipped = user.Equipped ?? new EquippedSkins();
 
-        string typeUpper = item.Type.Trim().ToUpperInvariant();
-        if (typeUpper.Contains("CHESS"))
+        if (item.Type == CosmeticLoadoutPolicy.SetType)
         {
             equipped.ChessSkinId = itemId;
+            equipped.PieceMode = "SET";
         }
-        else if (typeUpper.Contains("BOARD"))
+        else if (item.Type == CosmeticLoadoutPolicy.BoardType)
         {
             equipped.BoardSkinId = itemId;
+        }
+        else if (CosmeticLoadoutPolicy.SlotForType(item.Type) is { } slot)
+        {
+            equipped.Pieces ??= new();
+            equipped.Pieces.RemoveAll(p => p.Slot == slot);
+            equipped.Pieces.Add(new EquippedPiece { Slot = slot, ItemId = itemId });
+            equipped.PieceMode = "CUSTOM";
         }
         else
         {
@@ -138,6 +144,29 @@ public class InventoryService
 
         await _users.UpdateOneAsync(u => u.Id == userId, update);
 
+        return equipped;
+    }
+
+    public async Task<EquippedSkins> EquipLoadoutAsync(ObjectId userId, EquipLoadoutRequest request)
+    {
+        if (request == null || !ObjectId.TryParse(request.ChessSkinId, out var setId) ||
+            !ObjectId.TryParse(request.BoardSkinId, out var boardId) || request.Pieces == null || request.Pieces.Count > 12)
+            throw new InvalidOperationException("INVALID_LOADOUT");
+        var pieces = new List<EquippedPiece>();
+        foreach (var p in request.Pieces)
+        {
+            if (p == null || !ObjectId.TryParse(p.ItemId, out var id)) throw new InvalidOperationException("INVALID_LOADOUT");
+            pieces.Add(new EquippedPiece { Slot = p.Slot, ItemId = id });
+        }
+        var ids = pieces.Select(p => p.ItemId).Append(setId).Append(boardId).Distinct().ToList();
+        var items = await _items.Find(Builders<Item>.Filter.In(i => i.Id, ids)).ToListAsync();
+        var owned = await _playerItems.Find(Builders<PlayerItem>.Filter.Eq(i => i.UserId, userId) &
+            Builders<PlayerItem>.Filter.In(i => i.ItemId, ids)).ToListAsync();
+        var equipped = CosmeticLoadoutPolicy.Validate(request.PieceMode, setId, boardId, pieces,
+            items.ToDictionary(i => i.Id), owned.Select(i => i.ItemId).ToHashSet());
+        var result = await _users.UpdateOneAsync(u => u.Id == userId, Builders<User>.Update
+            .Set(u => u.Equipped, equipped).Set(u => u.UpdatedAt, DateTime.UtcNow));
+        if (result.MatchedCount != 1) throw new InvalidOperationException("USER_NOT_FOUND");
         return equipped;
     }
 

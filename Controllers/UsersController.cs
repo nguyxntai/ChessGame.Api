@@ -174,16 +174,7 @@ public class UsersController : ControllerBase
                     },
 
                 Equipped =
-                    new EquippedSkinsResponse
-                    {
-                        ChessSkinId =
-                            user.Equipped.ChessSkinId?
-                                .ToString(),
-
-                        BoardSkinId =
-                            user.Equipped.BoardSkinId?
-                                .ToString()
-                    },
+                    EquippedSkinsResponse.From(user.Equipped),
 
                 CreatedAt =
                     user.CreatedAt
