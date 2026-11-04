@@ -1,0 +1,20 @@
+{
+  "ShopCatalog": {
+    "Products": [
+      { "Id": "crystal", "Type": "CHESS_PIECE_SKIN", "UnityAssetKey": "ChessSets/CrystalBlue", "Golds": 2400, "Diamonds": 120 },
+      { "Id": "woodland", "Type": "CHESS_PIECE_SKIN", "UnityAssetKey": "ChessSets/Woodland", "Golds": 1800, "Diamonds": 90 },
+      { "Id": "forest", "Type": "BOARD_SKIN", "UnityAssetKey": "Boards/ForestGarden", "Golds": 1800, "Diamonds": 90 },
+      { "Id": "marble", "Type": "BOARD_SKIN", "UnityAssetKey": "Boards/ClassicMarble", "Golds": 1600, "Diamonds": 80 },
+      { "Id": "celestial", "Type": "BOARD_SKIN", "UnityAssetKey": "Boards/Celestial", "Golds": 6000, "Diamonds": 300 }
+    ],
+    "Offers": [
+      { "Id": "crystal", "Name": "Blue Crystal Chess Set", "Description": "A cool blue finish for every piece on the board. Includes both sides of the full set.", "Featured": true, "ProductIds": ["crystal"] },
+      { "Id": "woodland", "Name": "Woodland Chess Set", "Description": "Bring a little woodland charm to your next match. Includes both sides of the full set.", "ProductIds": ["woodland"] },
+      { "Id": "forest", "Name": "Forest Garden Board", "Description": "Your next match, in a quiet garden. A cosmetic board for every game mode.", "ProductIds": ["forest"] },
+      { "Id": "marble", "Name": "Classic Marble Board", "Description": "A timeless marble arena. The same game, with a fresh place to play.", "ProductIds": ["marble"] },
+      { "Id": "celestial", "Name": "Celestial Board", "Description": "A little wonder beneath every move. Includes the board's existing animated artwork.", "Featured": true, "ProductIds": ["celestial"] },
+      { "Id": "woodland-weekend", "Name": "Woodland Weekend", "Description": "The Woodland set and Forest Garden board, together. Pay only for the pieces of the bundle you still need.", "Featured": true, "DiscountPercent": 15, "ProductIds": ["woodland", "forest"] },
+      { "Id": "crystal-classics", "Name": "Crystal Classics", "Description": "Blue Crystal pieces meet Classic Marble. A complete new look for your next match.", "DiscountPercent": 15, "ProductIds": ["crystal", "marble"] }
+    ]
+  }
+}

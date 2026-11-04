@@ -154,6 +154,9 @@ builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<InventoryService>();
 builder.Services.AddScoped<GachaService>();
 builder.Services.AddScoped<WalletService>();
+builder.Configuration.AddJsonFile("shop-catalog.json", optional: false, reloadOnChange: false);
+builder.Services.Configure<ChessGame.Api.Services.Shop.ShopCatalogOptions>(builder.Configuration.GetSection("ShopCatalog"));
+builder.Services.AddScoped<ChessGame.Api.Services.Shop.ShopService>();
 builder.Services.AddScoped<JwtService>();
 builder.Services.AddScoped<RefreshTokenService>();
 
@@ -257,6 +260,7 @@ using (var scope = app.Services.CreateScope())
     await refreshTokenService.EnsureIndexesAsync();
     await scope.ServiceProvider.GetRequiredService<GachaService>().EnsureIndexesAsync();
     await scope.ServiceProvider.GetRequiredService<WalletService>().EnsureIndexesAsync();
+    await scope.ServiceProvider.GetRequiredService<ChessGame.Api.Services.Shop.ShopService>().EnsureIndexesAsync();
     await scope.ServiceProvider.GetRequiredService<OnlineStore>().EnsureIndexesAsync();
 }
 

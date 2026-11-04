@@ -112,7 +112,7 @@ public sealed partial class OnlineService
             var candidates = oldest.Concat(rotating).DistinctBy(x => x.Id).OrderBy(x => x.CreatedAt).ThenBy(x => x.Id).ToList();
             var ids = candidates.Select(x => ObjectId.Parse(x.UserId)).ToList();
             var users = (await store.Users.Find(s, Builders<ChessGame.Api.Models.User>.Filter.In(x => x.Id, ids)).ToListAsync(ct)).ToDictionary(x => x.Id.ToString());
-            var itemIds = users.Values.SelectMany(u => new[] { u.Equipped.ChessSkinId, u.Equipped.BoardSkinId }).Where(x => x.HasValue).Select(x => x!.Value).Distinct().ToList();
+            var itemIds = users.Values.SelectMany(u => ChessGame.Api.Services.CosmeticLoadoutPolicy.References(u.Equipped)).Select(x => x.Id).Distinct().ToList();
             var items = itemIds.Count == 0 ? new Dictionary<ObjectId, ChessGame.Api.Models.Item>() : (await store.Items.Find(s, Builders<ChessGame.Api.Models.Item>.Filter.In(x => x.Id, itemIds)).ToListAsync(ct)).ToDictionary(x => x.Id);
             var owned = itemIds.Count == 0 ? new HashSet<(ObjectId, ObjectId)>() : (await store.PlayerItems.Find(s, Builders<ChessGame.Api.Models.PlayerItem>.Filter.In(x => x.UserId, ids) &
                 Builders<ChessGame.Api.Models.PlayerItem>.Filter.In(x => x.ItemId, itemIds)).ToListAsync(ct)).Select(x => (x.UserId, x.ItemId)).ToHashSet();
@@ -125,9 +125,9 @@ public sealed partial class OnlineService
                 var previousRating = t.Rating; var previousPlacement = t.Provisional; var previousLatency = t.RoundTripMilliseconds;
                 bool valid = users.TryGetValue(t.UserId, out var u) && u.IsActive;
                 if (valid)
-                    foreach (var entry in new[] { (Id: u!.Equipped.ChessSkinId, Type: "CHESS"), (Id: u!.Equipped.BoardSkinId, Type: "BOARD") })
+                    foreach (var entry in ChessGame.Api.Services.CosmeticLoadoutPolicy.References(u!.Equipped))
                         if (entry.Id is { } itemId && (!items.TryGetValue(itemId, out var item) || !item.IsActive ||
-                            !item.Type.Contains(entry.Type, StringComparison.OrdinalIgnoreCase) || !owned.Contains((u.Id, itemId)))) valid = false;
+                            !ChessGame.Api.Services.CosmeticLoadoutPolicy.Fits(item.Type, entry.Slot) || !owned.Contains((u.Id, itemId)))) valid = false;
                 if (!valid)
                 {
                     t.Status = "Cancelled";

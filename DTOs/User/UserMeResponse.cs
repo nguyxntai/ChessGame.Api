@@ -53,6 +53,13 @@ public class PlayerStatsResponse
 
 public class EquippedSkinsResponse
 {
+    public int LoadoutVersion { get; set; } = 1;
+    public string PieceMode { get; set; } = "SET";
+    public List<ChessGame.Api.DTOs.Inventory.EquipPieceRequest> Pieces { get; set; } = new();
+    public static EquippedSkinsResponse From(ChessGame.Api.Models.EquippedSkins e) => new() {
+        ChessSkinId = e.ChessSkinId?.ToString(), BoardSkinId = e.BoardSkinId?.ToString(), PieceMode = e.PieceMode,
+        Pieces = (e.Pieces ?? new()).Select(p => new ChessGame.Api.DTOs.Inventory.EquipPieceRequest { Slot = p.Slot, ItemId = p.ItemId.ToString() }).ToList()
+    };
     public string? ChessSkinId { get; set; }
 
     public string? BoardSkinId { get; set; }
