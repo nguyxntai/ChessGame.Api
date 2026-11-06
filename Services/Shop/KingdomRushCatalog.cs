@@ -76,7 +76,7 @@ public static class KingdomRushCatalog
                 await archive.UpdateOneAsync(transaction,new BsonDocument("_id",row.Id),new BsonDocument("$setOnInsert",doc),new UpdateOptions{IsUpsert=true},ct);
             }
             await users.UpdateManyAsync(transaction,Builders<User>.Filter.In(u=>u.Equipped.ChessSkinId,retired.Select(i=>(ObjectId?)i)),
-                Builders<User>.Update.Set(u=>u.Equipped.ChessSkinId,null).Set(u=>u.Equipped.PieceMode,"SET"),cancellationToken:ct);
+                Builders<User>.Update.Set(u=>u.Equipped.ChessSkinId,null),cancellationToken:ct);
             await users.UpdateManyAsync(transaction,Builders<User>.Filter.In(u=>u.Equipped.BoardSkinId,retired.Select(i=>(ObjectId?)i)),
                 Builders<User>.Update.Set(u=>u.Equipped.BoardSkinId,null),cancellationToken:ct);
             await ownership.DeleteManyAsync(transaction,filter,cancellationToken:ct);

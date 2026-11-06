@@ -103,11 +103,15 @@ try
     var oldBoard=oldItems.Single(i=>i.Type==CosmeticLoadoutPolicy.BoardType);
     var oldBg=oldItems.Single(i=>i.Type==CosmeticLoadoutPolicy.BackgroundType);
     await users.UpdateOneAsync(u=>u.Id==oldOwner.Id,Builders<User>.Update.Set(u=>u.Equipped,new EquippedSkins{ChessSkinId=oldSet.Id,BoardSkinId=oldBoard.Id,BackgroundSkinId=oldBg.Id}));
+    var customOwner=await User();
+    await users.UpdateOneAsync(u=>u.Id==customOwner.Id,Builders<User>.Update.Set(u=>u.Equipped,new EquippedSkins{ChessSkinId=oldSet.Id,PieceMode="CUSTOM",Pieces=new(){new(){Slot="WHITE_PAWN",ItemId=a.Id}}}));
     await KingdomRushCatalog.EnsureItemsAsync(db); await KingdomRushCatalog.EnsureItemsAsync(db);
     var krItems=await items.Find(i=>i.UnityAssetKey==KingdomRushCatalog.AssetKey||i.UnityAssetKey==KingdomRushCatalog.DenasKey||i.UnityAssetKey==KingdomRushCatalog.VeznanKey).ToListAsync();
     Need(krItems.Count==9&&krItems.Count(i=>i.IsActive)==7&&krItems.All(i=>i.ShopExclusive&&i.Rarity=="LEGENDARY"),"Idempotent installer: six faction products, legacy Legendary background and two archived items");
     var migrated=await users.Find(u=>u.Id==oldOwner.Id).SingleAsync();
     var kept=await inventory.Find(i=>i.UserId==oldOwner.Id).ToListAsync();
+    var customAfter=await users.Find(u=>u.Id==customOwner.Id).SingleAsync();
+    Need(customAfter.Equipped.ChessSkinId==null&&customAfter.Equipped.PieceMode=="CUSTOM"&&customAfter.Equipped.Pieces.Single().ItemId==a.Id,"Retiring a saved set fallback preserves active custom-piece mode and bindings");
     Need(kept.Count==1&&kept[0].ItemId==oldBg.Id&&migrated.Equipped.ChessSkinId==null&&migrated.Equipped.BoardSkinId==null&&migrated.Equipped.BackgroundSkinId==oldBg.Id,"Retirement revokes only mixed board/set and unequips them, retaining owned/equipped old background");
     Need(migrated.Wallet.Golds==123456&&migrated.Wallet.Diamonds==7890&&migrated.Wallet.Tickets==17&&await db.GetCollection<BsonDocument>("kingdom_rush_retired_ownership").CountDocumentsAsync(new BsonDocument())==2,"No compensation or currency change; exactly two original ownership records archived across retries");
     var invService=new InventoryService(db);
