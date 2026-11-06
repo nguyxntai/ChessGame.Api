@@ -102,21 +102,45 @@ try
     var krOptions = System.Text.Json.JsonSerializer.Deserialize<ShopCatalogOptions>(configJson.RootElement.GetProperty("ShopCatalog").GetRawText())!;
     var krShop = new ShopService(db, client, Options.Create(krOptions));
     var offers = (await krShop.GetCatalogAsync()).Offers.Where(o => o.OfferId.StartsWith("kingdom-rush-", StringComparison.Ordinal)).ToList();
-    Need(offers.Count == 3 && offers.All(o => !o.IsBundle && o.DiscountPercent == 0), "Three separate full-price collab offers; no basic-background sale");
+    var standalone = offers.Where(o => !o.IsBundle).ToList();
+    var complete = offers.Single(o => o.OfferId == "kingdom-rush-complete");
+    Need(offers.Count == 4 && standalone.Count == 3 && standalone.All(o => o.DiscountPercent == 0), "Three separate full-price collab offers plus complete bundle; no basic-background sale");
+    Need(complete.IsBundle && complete.DiscountPercent == 25 && complete.Items.Count == 3 &&
+        complete.Items.Select(i => i.ItemId).ToHashSet().SetEquals(krItems.Select(i => i.Id.ToString())), "Complete collab bundle contains exactly the three products with 25 percent discount");
+    var unowned = new HashSet<string>();
+    Need(complete.Items.Sum(i => i.Golds) == 120000 && complete.Items.Sum(i => i.Diamonds) == 6000 &&
+        ShopCatalog.Quote(complete, unowned, "GOLDS").Price == 90000 && ShopCatalog.Quote(complete, unowned, "DIAMONDS").Price == 4500,
+        "Combined 120000 Gold / 6000 Diamonds becomes 90000 Gold / 4500 Diamonds");
     Need(offers.SelectMany(o => o.Items).All(i => i.Golds > 6000 && i.Diamonds > 300), "Every collab product costs more than the previous most expensive skin");
     var collector = await User(500000, 25000);
     var invService = new InventoryService(db);
     var bg = krItems.Single(i => i.Type == CosmeticLoadoutPolicy.BackgroundType);
     try { await invService.EquipBackgroundAsync(collector.Id, bg.Id.ToString()); throw new Exception("Unowned background equipped"); }
     catch (InvalidOperationException e) { Need(e.Message == "ITEM_NOT_OWNED", "Unowned paid background cannot be equipped"); }
-    foreach (var offer in offers)
+    foreach (var offer in standalone)
     {
         var product = offer.Items.Single();
         var req = new ShopPurchaseRequest { RequestId = Guid.NewGuid(), OfferId = offer.OfferId, Currency = "GOLDS", ExpectedPrice = product.Golds, ExpectedItemIds = new() { product.ItemId } };
         await krShop.PurchaseAsync(collector.Id, req); await krShop.PurchaseAsync(collector.Id, req);
     }
-    Need(await Gold(collector) == 500000 - offers.Sum(o => o.Items.Single().Golds) &&
+    Need(await Gold(collector) == 500000 - standalone.Sum(o => o.Items.Single().Golds) &&
         await inventory.CountDocumentsAsync(i => i.UserId == collector.Id) == 3, "Buying all collab items and retrying charges exactly once per item");
+    var bundleBuyer = await User(120000, 6000);
+    var bundleRequest = new ShopPurchaseRequest { RequestId = Guid.NewGuid(), OfferId = complete.OfferId, Currency = "GOLDS", ExpectedPrice = 90000,
+        ExpectedItemIds = complete.Items.Select(i => i.ItemId).ToList() };
+    await krShop.PurchaseAsync(bundleBuyer.Id, bundleRequest); await krShop.PurchaseAsync(bundleBuyer.Id, bundleRequest);
+    Need(await Gold(bundleBuyer) == 30000 && await inventory.CountDocumentsAsync(i => i.UserId == bundleBuyer.Id) == 3 &&
+        await receipts.CountDocumentsAsync(i => i.UserId == bundleBuyer.Id) == 1, "Full collab bundle grants all three products for one discounted Gold debit, including retry");
+    var diamondBuyer = await User(120000, 6000);
+    var diamondRequest = new ShopPurchaseRequest { RequestId = Guid.NewGuid(), OfferId = complete.OfferId, Currency = "DIAMONDS", ExpectedPrice = 4500,
+        ExpectedItemIds = complete.Items.Select(i => i.ItemId).ToList() };
+    var diamondReceipt = await krShop.PurchaseAsync(diamondBuyer.Id, diamondRequest);
+    Need(diamondReceipt.Wallet.Diamonds == 1500 && diamondReceipt.Wallet.Golds == 120000 && diamondReceipt.GrantedItemIds.Count == 3,
+        "Full collab bundle supports the exact 4500-Diamond alternative without spending Gold");
+    var ownedSet = complete.Items.Single(i => i.Type == CosmeticLoadoutPolicy.SetType).ItemId;
+    Need(ShopCatalog.Quote(complete, new HashSet<string> { ownedSet }, "GOLDS").Price == 45000 &&
+        ShopCatalog.Quote(complete, new HashSet<string> { ownedSet }, "DIAMONDS").Price == 2250,
+        "Already owned set is excluded before applying 25 percent discount to remaining board and background");
     var equippedBg = await invService.EquipBackgroundAsync(collector.Id, bg.Id.ToString());
     Need(equippedBg.BackgroundSkinId == bg.Id && CosmeticLoadoutPolicy.References(equippedBg).Single().Slot == "BACKGROUND", "Owned background equips and appears in frozen online loadout references");
     var krSet = krItems.Single(i => i.Type == CosmeticLoadoutPolicy.SetType); var krBoard = krItems.Single(i => i.Type == CosmeticLoadoutPolicy.BoardType);

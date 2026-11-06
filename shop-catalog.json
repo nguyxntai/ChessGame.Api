@@ -20,7 +20,8 @@
       { "Id": "crystal-classics", "Name": "Crystal Classics", "Description": "Blue Crystal pieces meet Classic Marble. A complete new look for your next match.", "DiscountPercent": 15, "ProductIds": ["crystal", "marble"] },
       { "Id": "kingdom-rush-pieces", "Name": "Kingdom Rush — Denas & Vez'Nan", "Description": "Premium collaboration. Includes all twelve Denas and Vez'Nan piece models for both sides. Board and background sold separately. Shop exclusive; unavailable through summons.", "Featured": true, "ProductIds": ["kingdom-rush-pieces"] },
       { "Id": "kingdom-rush-board", "Name": "Kingdom Rush — Citadel Board", "Description": "Premium collaboration arena with 64 playable tiles and twelve prisoner pads. Pieces and background sold separately. Shop exclusive.", "Featured": true, "ProductIds": ["kingdom-rush-board"] },
-      { "Id": "kingdom-rush-background", "Name": "Kingdom Rush — Linirea Valley", "Description": "Premium collaboration landscape, sold separately. Equip with any board. Shop exclusive; unavailable through summons.", "Featured": true, "ProductIds": ["kingdom-rush-background"] }
+      { "Id": "kingdom-rush-background", "Name": "Kingdom Rush — Linirea Valley", "Description": "Premium collaboration landscape, sold separately. Equip with any board. Shop exclusive; unavailable through summons.", "Featured": true, "ProductIds": ["kingdom-rush-background"] },
+      { "Id": "kingdom-rush-complete", "Name": "Kingdom Rush — Complete Collection", "Description": "The full Denas & Vez'Nan chess set, Citadel Board and Linirea Valley background together. Save 25% on their combined price. Owned items are excluded before the discount. Shop exclusive; unavailable through summons.", "Featured": true, "DiscountPercent": 25, "ProductIds": ["kingdom-rush-pieces", "kingdom-rush-board", "kingdom-rush-background"] }
     ]
   }
 }
