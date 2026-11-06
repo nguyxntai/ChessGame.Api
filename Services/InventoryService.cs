@@ -126,6 +126,10 @@ public class InventoryService
         {
             equipped.BoardSkinId = itemId;
         }
+        else if (item.Type == CosmeticLoadoutPolicy.BackgroundType)
+        {
+            equipped.BackgroundSkinId = itemId;
+        }
         else if (CosmeticLoadoutPolicy.SlotForType(item.Type) is { } slot)
         {
             equipped.Pieces ??= new();
@@ -138,13 +142,17 @@ public class InventoryService
             throw new InvalidOperationException("ITEM_NOT_EQUIPPABLE");
         }
 
-        var update = Builders<User>.Update
-            .Set(u => u.Equipped, equipped)
-            .Set(u => u.UpdatedAt, DateTime.UtcNow);
-
-        await _users.UpdateOneAsync(u => u.Id == userId, update);
-
-        return equipped;
+        var update = Builders<User>.Update.Set(u => u.UpdatedAt, DateTime.UtcNow);
+        if (item.Type == CosmeticLoadoutPolicy.SetType)
+            update = update.Set(u => u.Equipped.ChessSkinId, itemId).Set(u => u.Equipped.PieceMode, "SET");
+        else if (item.Type == CosmeticLoadoutPolicy.BoardType)
+            update = update.Set(u => u.Equipped.BoardSkinId, itemId);
+        else if (item.Type == CosmeticLoadoutPolicy.BackgroundType)
+            update = update.Set(u => u.Equipped.BackgroundSkinId, itemId);
+        else update = update.Set(u => u.Equipped.Pieces, equipped.Pieces).Set(u => u.Equipped.PieceMode, "CUSTOM");
+        var saved = await _users.FindOneAndUpdateAsync(u => u.Id == userId, update,
+            new FindOneAndUpdateOptions<User> { ReturnDocument = ReturnDocument.After });
+        return saved?.Equipped ?? throw new InvalidOperationException("USER_NOT_FOUND");
     }
 
     public async Task<EquippedSkins> EquipLoadoutAsync(ObjectId userId, EquipLoadoutRequest request)
@@ -164,10 +172,34 @@ public class InventoryService
             Builders<PlayerItem>.Filter.In(i => i.ItemId, ids)).ToListAsync();
         var equipped = CosmeticLoadoutPolicy.Validate(request.PieceMode, setId, boardId, pieces,
             items.ToDictionary(i => i.Id), owned.Select(i => i.ItemId).ToHashSet());
-        var result = await _users.UpdateOneAsync(u => u.Id == userId, Builders<User>.Update
-            .Set(u => u.Equipped, equipped).Set(u => u.UpdatedAt, DateTime.UtcNow));
-        if (result.MatchedCount != 1) throw new InvalidOperationException("USER_NOT_FOUND");
-        return equipped;
+        // Background is independently equipped; changing set/custom slots must
+        // not overwrite it, including concurrent background requests.
+        var user = await _users.FindOneAndUpdateAsync(u => u.Id == userId, Builders<User>.Update
+            .Set(u => u.Equipped.ChessSkinId, equipped.ChessSkinId)
+            .Set(u => u.Equipped.BoardSkinId, equipped.BoardSkinId)
+            .Set(u => u.Equipped.PieceMode, equipped.PieceMode)
+            .Set(u => u.Equipped.Pieces, equipped.Pieces)
+            .Set(u => u.UpdatedAt, DateTime.UtcNow), new FindOneAndUpdateOptions<User> { ReturnDocument = ReturnDocument.After });
+        if (user == null) throw new InvalidOperationException("USER_NOT_FOUND");
+        return user.Equipped;
+    }
+
+    public async Task<EquippedSkins> EquipBackgroundAsync(ObjectId userId, string? itemId)
+    {
+        ObjectId? background = null;
+        if (!string.IsNullOrWhiteSpace(itemId))
+        {
+            if (!ObjectId.TryParse(itemId, out var id)) throw new InvalidOperationException("ITEM_NOT_FOUND");
+            var item = await _items.Find(i => i.Id == id && i.IsActive).FirstOrDefaultAsync();
+            if (item == null) throw new InvalidOperationException("ITEM_NOT_FOUND");
+            if (item.Type != CosmeticLoadoutPolicy.BackgroundType) throw new InvalidOperationException("ITEM_NOT_EQUIPPABLE");
+            if (!await _playerItems.Find(i => i.UserId == userId && i.ItemId == id).AnyAsync()) throw new InvalidOperationException("ITEM_NOT_OWNED");
+            background = id;
+        }
+        var user = await _users.FindOneAndUpdateAsync(u => u.Id == userId && u.IsActive,
+            Builders<User>.Update.Set(u => u.Equipped.BackgroundSkinId, background).Set(u => u.UpdatedAt, DateTime.UtcNow),
+            new FindOneAndUpdateOptions<User> { ReturnDocument = ReturnDocument.After });
+        return user?.Equipped ?? throw new InvalidOperationException("USER_NOT_FOUND");
     }
 
     public async Task<(Item ChessSkin, Item BoardSkin)> GetDefaultSkinsAsync()

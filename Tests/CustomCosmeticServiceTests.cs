@@ -30,11 +30,14 @@ public sealed class CustomCosmeticServiceTests
                 return Task.FromResult(Cursor(rows));
             });
         BsonDocument? write = null;
-        users.Setup(c => c.UpdateOneAsync(It.IsAny<FilterDefinition<User>>(), It.IsAny<UpdateDefinition<User>>(), It.IsAny<UpdateOptions>(), It.IsAny<CancellationToken>()))
-            .Callback((FilterDefinition<User> f, UpdateDefinition<User> u, UpdateOptions _, CancellationToken _) => {
+        var backgroundId = ObjectId.GenerateNewId();
+        users.Setup(c => c.FindOneAndUpdateAsync(It.IsAny<FilterDefinition<User>>(), It.IsAny<UpdateDefinition<User>>(), It.IsAny<FindOneAndUpdateOptions<User, User>>(), It.IsAny<CancellationToken>()))
+            .Callback((FilterDefinition<User> f, UpdateDefinition<User> u, FindOneAndUpdateOptions<User, User> options, CancellationToken _) => {
                 Assert.Equal(caller, Render(f)["_id"].AsObjectId);
+                Assert.Equal(ReturnDocument.After, options.ReturnDocument);
                 write = u.Render(new RenderArgs<User>(BsonSerializer.LookupSerializer<User>(), BsonSerializer.SerializerRegistry)).AsBsonDocument;
-            }).ReturnsAsync(new UpdateResult.Acknowledged(1, 1, null));
+            }).ReturnsAsync(() => new User { Id = caller, Equipped = new EquippedSkins { BackgroundSkinId = backgroundId,
+                ChessSkinId = set.Id, BoardSkinId = board.Id, PieceMode = "CUSTOM", Pieces = new() { new() { Slot = "BLACK_KNIGHT", ItemId = piece.Id } } } });
         var request = new EquipLoadoutRequest { PieceMode = "CUSTOM", ChessSkinId = set.Id.ToString(), BoardSkinId = board.Id.ToString(),
             Pieces = new() { new() { Slot = "BLACK_KNIGHT", ItemId = piece.Id.ToString() } } };
         var service = new InventoryService(db.Object);
@@ -48,7 +51,8 @@ public sealed class CustomCosmeticServiceTests
             var equipped = await service.EquipLoadoutAsync(caller, request);
             Assert.Equal(piece.Id, Assert.Single(equipped.Pieces).ItemId);
             Assert.NotNull(write); Assert.Single(write);
-            Assert.Equal(new[] { "equipped", "updatedAt" }, write["$set"].AsBsonDocument.Names.Order().ToArray());
+            Assert.Equal(new[] { "equipped.boardSkinId", "equipped.chessSkinId", "equipped.pieceMode", "equipped.pieces", "updatedAt" }, write["$set"].AsBsonDocument.Names.Order().ToArray());
+            Assert.Equal(backgroundId, equipped.BackgroundSkinId);
         }
         // Strict mocks also reject grants, user inserts, catalog writes, sessions and extra collections.
     }

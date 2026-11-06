@@ -94,6 +94,20 @@ public class InventoryController : ControllerBase
         { return BadRequest(new { code = ex.Message, message = "Loadout could not be equipped. Refresh your inventory." }); }
     }
 
+    [Authorize]
+    [HttpPut("background")]
+    public async Task<IActionResult> EquipBackground([FromBody] BackgroundEquipRequest request)
+    {
+        if (!TryGetUserId(out var userId, out var error)) return error;
+        try
+        {
+            var equipped = await _inventoryService.EquipBackgroundAsync(userId, request.ItemId);
+            return Ok(new EquipItemResponse { Success = true, Message = "Background saved.", Equipped = EquippedSkinsResponse.From(equipped) });
+        }
+        catch (InvalidOperationException ex) when (ex.Message is "ITEM_NOT_FOUND" or "ITEM_NOT_OWNED" or "ITEM_NOT_EQUIPPABLE" or "USER_NOT_FOUND")
+        { return BadRequest(new { code = ex.Message, message = "Background could not be equipped. Refresh your inventory." }); }
+    }
+
     private bool TryGetUserId(out ObjectId userId, out IActionResult errorResult)
     {
         userId = ObjectId.Empty;

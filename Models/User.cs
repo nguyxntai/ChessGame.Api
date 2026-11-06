@@ -103,6 +103,9 @@ public class EquippedSkins
 
     [BsonElement("boardSkinId")]
     public ObjectId? BoardSkinId { get; set; }
+
+    [BsonElement("backgroundSkinId")]
+    public ObjectId? BackgroundSkinId { get; set; }
 }
 
 public class EquippedPiece

@@ -29,4 +29,7 @@ public class Item
 
     [BsonElement("isActive")]
     public bool IsActive { get; set; }
+
+    [BsonElement("shopExclusive")]
+    public bool ShopExclusive { get; set; }
 }

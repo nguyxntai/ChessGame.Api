@@ -569,7 +569,7 @@ public sealed class GachaService
             : await _items.Find(session, filter).ToListAsync(cancellationToken);
         var byId = items.ToDictionary(x => x.Id);
 
-        if (byId.Count != ids.Count || items.Any(x => !x.IsActive || x.IsDefault
+        if (byId.Count != ids.Count || items.Any(x => !x.IsActive || x.IsDefault || x.ShopExclusive
             || !IsKnownRarity(x.Rarity)))
             throw new GachaException("BANNER_MISCONFIGURED");
 

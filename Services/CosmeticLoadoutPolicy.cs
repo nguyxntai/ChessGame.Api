@@ -6,14 +6,14 @@ namespace ChessGame.Api.Services;
 // Exact protocol tokens. No catalog registration, artwork approval or economic grant.
 public static class CosmeticLoadoutPolicy
 {
-    public const string SetType = "CHESS_PIECE_SKIN", BoardType = "BOARD_SKIN";
+    public const string SetType = "CHESS_PIECE_SKIN", BoardType = "BOARD_SKIN", BackgroundType = "BACKGROUND_SKIN";
     public static readonly IReadOnlyList<string> Slots = Array.AsReadOnly(new[] {
         "WHITE_PAWN", "WHITE_ROOK", "WHITE_KNIGHT", "WHITE_BISHOP", "WHITE_QUEEN", "WHITE_KING",
         "BLACK_PAWN", "BLACK_ROOK", "BLACK_KNIGHT", "BLACK_BISHOP", "BLACK_QUEEN", "BLACK_KING" });
     public static bool IsSlot(string? slot) => slot != null && Slots.Contains(slot, StringComparer.Ordinal);
     public static string? SlotForType(string? type) => Slots.FirstOrDefault(s => type == "CHESS_" + s + "_SKIN");
     public static bool Fits(string? type, string slot) => slot switch {
-        "SET" => type == SetType, "BOARD" => type == BoardType,
+        "SET" => type == SetType, "BOARD" => type == BoardType, "BACKGROUND" => type == BackgroundType,
         _ => IsSlot(slot) && (type == SetType || SlotForType(type) == slot)
     };
 
@@ -21,6 +21,7 @@ public static class CosmeticLoadoutPolicy
     {
         if (e.ChessSkinId is { } set) yield return (set, "SET");
         if (e.BoardSkinId is { } board) yield return (board, "BOARD");
+        if (e.BackgroundSkinId is { } background) yield return (background, "BACKGROUND");
         if (e.PieceMode == "CUSTOM")
             foreach (var piece in e.Pieces ?? new()) yield return (piece.ItemId, piece.Slot);
     }

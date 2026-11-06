@@ -48,7 +48,7 @@ public static class ItemCatalogReadiness
         var ids = b.Pool.Select(e => e.ItemId).ToHashSet();
         var items = catalog.Where(i => i is not null && ids.Contains(i.Id)).ToArray();
         if (items.Length != ids.Count || items.Select(i => i.Id).Distinct().Count() != ids.Count
-            || items.Any(i => !i.IsActive || i.IsDefault || i.Rarity is null
+            || items.Any(i => !i.IsActive || i.IsDefault || i.ShopExclusive || i.Rarity is null
                 || i.Rarity.ToUpperInvariant() is not ("COMMON" or "RARE" or "EPIC" or "LEGENDARY"))) return false;
         try
         {

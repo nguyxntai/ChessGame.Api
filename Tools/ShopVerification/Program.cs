@@ -93,6 +93,48 @@ try
     Need(await Gold(rollback) == 10000 && await inventory.CountDocumentsAsync(x => x.UserId == rollback.Id) == 0 &&
         await ledger.CountDocumentsAsync(x => x.UserId == rollback.Id) == 0 && await receipts.CountDocumentsAsync(x => x.UserId == rollback.Id) == 0,
         "Injected grant failure rolls back debit, inventory, ledger and receipt");
+    // Actual collab configuration, isolated database and synthetic wallets only.
+    await KingdomRushCatalog.EnsureItemsAsync(db);
+    await KingdomRushCatalog.EnsureItemsAsync(db);
+    var krItems = await items.Find(i => i.UnityAssetKey == KingdomRushCatalog.AssetKey).ToListAsync();
+    Need(krItems.Count == 3 && krItems.All(i => i.ShopExclusive && !i.IsDefault), "Collab installer is idempotent: exactly three shop-exclusive products");
+    using var configJson = System.Text.Json.JsonDocument.Parse(File.ReadAllText("shop-catalog.json"));
+    var krOptions = System.Text.Json.JsonSerializer.Deserialize<ShopCatalogOptions>(configJson.RootElement.GetProperty("ShopCatalog").GetRawText())!;
+    var krShop = new ShopService(db, client, Options.Create(krOptions));
+    var offers = (await krShop.GetCatalogAsync()).Offers.Where(o => o.OfferId.StartsWith("kingdom-rush-", StringComparison.Ordinal)).ToList();
+    Need(offers.Count == 3 && offers.All(o => !o.IsBundle && o.DiscountPercent == 0), "Three separate full-price collab offers; no basic-background sale");
+    Need(offers.SelectMany(o => o.Items).All(i => i.Golds > 6000 && i.Diamonds > 300), "Every collab product costs more than the previous most expensive skin");
+    var collector = await User(500000, 25000);
+    var invService = new InventoryService(db);
+    var bg = krItems.Single(i => i.Type == CosmeticLoadoutPolicy.BackgroundType);
+    try { await invService.EquipBackgroundAsync(collector.Id, bg.Id.ToString()); throw new Exception("Unowned background equipped"); }
+    catch (InvalidOperationException e) { Need(e.Message == "ITEM_NOT_OWNED", "Unowned paid background cannot be equipped"); }
+    foreach (var offer in offers)
+    {
+        var product = offer.Items.Single();
+        var req = new ShopPurchaseRequest { RequestId = Guid.NewGuid(), OfferId = offer.OfferId, Currency = "GOLDS", ExpectedPrice = product.Golds, ExpectedItemIds = new() { product.ItemId } };
+        await krShop.PurchaseAsync(collector.Id, req); await krShop.PurchaseAsync(collector.Id, req);
+    }
+    Need(await Gold(collector) == 500000 - offers.Sum(o => o.Items.Single().Golds) &&
+        await inventory.CountDocumentsAsync(i => i.UserId == collector.Id) == 3, "Buying all collab items and retrying charges exactly once per item");
+    var equippedBg = await invService.EquipBackgroundAsync(collector.Id, bg.Id.ToString());
+    Need(equippedBg.BackgroundSkinId == bg.Id && CosmeticLoadoutPolicy.References(equippedBg).Single().Slot == "BACKGROUND", "Owned background equips and appears in frozen online loadout references");
+    var krSet = krItems.Single(i => i.Type == CosmeticLoadoutPolicy.SetType); var krBoard = krItems.Single(i => i.Type == CosmeticLoadoutPolicy.BoardType);
+    var equippedAll = await invService.EquipLoadoutAsync(collector.Id, new ChessGame.Api.DTOs.Inventory.EquipLoadoutRequest {
+        ChessSkinId = krSet.Id.ToString(), BoardSkinId = krBoard.Id.ToString() });
+    Need(equippedAll.BackgroundSkinId == bg.Id && CosmeticLoadoutPolicy.References(equippedAll).Count() == 3,
+        "Set/board equipment preserves independently purchased background");
+    Need((await invService.GetUserInventoryAsync(collector.Id)).All(i => i.IsEquipped), "Inventory marks all three collab categories equipped");
+    var resetBg = await invService.EquipBackgroundAsync(collector.Id, null);
+    Need(resetBg.BackgroundSkinId == null && resetBg.ChessSkinId == krSet.Id && resetBg.BoardSkinId == krBoard.Id,
+        "Restoring locked default background preserves set, board, wallet and ownership");
+    try { await invService.EquipBackgroundAsync(collector.Id, krBoard.Id.ToString()); throw new Exception("Board used as background"); }
+    catch (InvalidOperationException e) { Need(e.Message == "ITEM_NOT_EQUIPPABLE", "Board ownership cannot substitute for background ownership"); }
+    var banner = new GachaBanner { Code = "KR_EXCLUSION_FIXTURE", IsActive = true, PityGroup = "fixture", Pity = new() { Epic = 10, Legendary = 80 },
+        Costs = new() { new() { RollCount = 1, Currency = "TICKETS", Amount = 1 } }, Pool = new() { new() { ItemId = bg.Id, Weight = 1 } } };
+    await db.GetCollection<GachaBanner>("gacha_banners").InsertOneAsync(banner);
+    try { await new GachaService(db, client, invService).GetBannerAsync(banner.Code); throw new Exception("Shop exclusive accepted by gacha"); }
+    catch (GachaException e) { Need(e.Code == "BANNER_MISCONFIGURED", "Gacha rejects a shop-exclusive collab even if accidentally added to a banner"); }
     File.WriteAllLines(Path.Combine(directory, "checks.txt"), checks);
     Console.WriteLine("SHOP_INTEGRATION_PASS " + checks.Count);
 }

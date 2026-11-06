@@ -5,7 +5,10 @@
       { "Id": "woodland", "Type": "CHESS_PIECE_SKIN", "UnityAssetKey": "ChessSets/Woodland", "Golds": 1800, "Diamonds": 90 },
       { "Id": "forest", "Type": "BOARD_SKIN", "UnityAssetKey": "Boards/ForestGarden", "Golds": 1800, "Diamonds": 90 },
       { "Id": "marble", "Type": "BOARD_SKIN", "UnityAssetKey": "Boards/ClassicMarble", "Golds": 1600, "Diamonds": 80 },
-      { "Id": "celestial", "Type": "BOARD_SKIN", "UnityAssetKey": "Boards/Celestial", "Golds": 6000, "Diamonds": 300 }
+      { "Id": "celestial", "Type": "BOARD_SKIN", "UnityAssetKey": "Boards/Celestial", "Golds": 6000, "Diamonds": 300 },
+      { "Id": "kingdom-rush-pieces", "Type": "CHESS_PIECE_SKIN", "UnityAssetKey": "kingdom_rush", "Golds": 60000, "Diamonds": 3000 },
+      { "Id": "kingdom-rush-board", "Type": "BOARD_SKIN", "UnityAssetKey": "kingdom_rush", "Golds": 36000, "Diamonds": 1800 },
+      { "Id": "kingdom-rush-background", "Type": "BACKGROUND_SKIN", "UnityAssetKey": "kingdom_rush", "Golds": 24000, "Diamonds": 1200 }
     ],
     "Offers": [
       { "Id": "crystal", "Name": "Blue Crystal Chess Set", "Description": "A cool blue finish for every piece on the board. Includes both sides of the full set.", "Featured": true, "ProductIds": ["crystal"] },
@@ -14,7 +17,10 @@
       { "Id": "marble", "Name": "Classic Marble Board", "Description": "A timeless marble arena. The same game, with a fresh place to play.", "ProductIds": ["marble"] },
       { "Id": "celestial", "Name": "Celestial Board", "Description": "A little wonder beneath every move. Includes the board's existing animated artwork.", "Featured": true, "ProductIds": ["celestial"] },
       { "Id": "woodland-weekend", "Name": "Woodland Weekend", "Description": "The Woodland set and Forest Garden board, together. Pay only for the pieces of the bundle you still need.", "Featured": true, "DiscountPercent": 15, "ProductIds": ["woodland", "forest"] },
-      { "Id": "crystal-classics", "Name": "Crystal Classics", "Description": "Blue Crystal pieces meet Classic Marble. A complete new look for your next match.", "DiscountPercent": 15, "ProductIds": ["crystal", "marble"] }
+      { "Id": "crystal-classics", "Name": "Crystal Classics", "Description": "Blue Crystal pieces meet Classic Marble. A complete new look for your next match.", "DiscountPercent": 15, "ProductIds": ["crystal", "marble"] },
+      { "Id": "kingdom-rush-pieces", "Name": "Kingdom Rush — Denas & Vez'Nan", "Description": "Premium collaboration. Includes all twelve Denas and Vez'Nan piece models for both sides. Board and background sold separately. Shop exclusive; unavailable through summons.", "Featured": true, "ProductIds": ["kingdom-rush-pieces"] },
+      { "Id": "kingdom-rush-board", "Name": "Kingdom Rush — Citadel Board", "Description": "Premium collaboration arena with 64 playable tiles and twelve prisoner pads. Pieces and background sold separately. Shop exclusive.", "Featured": true, "ProductIds": ["kingdom-rush-board"] },
+      { "Id": "kingdom-rush-background", "Name": "Kingdom Rush — Linirea Valley", "Description": "Premium collaboration landscape, sold separately. Equip with any board. Shop exclusive; unavailable through summons.", "Featured": true, "ProductIds": ["kingdom-rush-background"] }
     ]
   }
 }

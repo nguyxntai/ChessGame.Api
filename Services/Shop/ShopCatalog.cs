@@ -40,7 +40,7 @@ public static class ShopCatalog
         {
             if (string.IsNullOrWhiteSpace(product.Id) || product.Golds <= 0 || product.Diamonds <= 0 ||
                 product.Golds > 1_000_000_000 || product.Diamonds > 1_000_000_000 ||
-                product.Type != CosmeticLoadoutPolicy.SetType && product.Type != CosmeticLoadoutPolicy.BoardType &&
+                product.Type != CosmeticLoadoutPolicy.SetType && product.Type != CosmeticLoadoutPolicy.BoardType && product.Type != CosmeticLoadoutPolicy.BackgroundType &&
                 CosmeticLoadoutPolicy.SlotForType(product.Type) == null)
                 throw new ShopException("SHOP_CONFIG_INVALID");
             var matches = items.Where(i => i.IsActive && !i.IsDefault && i.Type == product.Type &&

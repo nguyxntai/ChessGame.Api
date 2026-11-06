@@ -261,6 +261,7 @@ using (var scope = app.Services.CreateScope())
     await scope.ServiceProvider.GetRequiredService<GachaService>().EnsureIndexesAsync();
     await scope.ServiceProvider.GetRequiredService<WalletService>().EnsureIndexesAsync();
     await scope.ServiceProvider.GetRequiredService<ChessGame.Api.Services.Shop.ShopService>().EnsureIndexesAsync();
+    await ChessGame.Api.Services.Shop.KingdomRushCatalog.EnsureItemsAsync(scope.ServiceProvider.GetRequiredService<IMongoDatabase>());
     await scope.ServiceProvider.GetRequiredService<OnlineStore>().EnsureIndexesAsync();
 }
 
