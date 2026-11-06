@@ -93,72 +93,63 @@ try
     Need(await Gold(rollback) == 10000 && await inventory.CountDocumentsAsync(x => x.UserId == rollback.Id) == 0 &&
         await ledger.CountDocumentsAsync(x => x.UserId == rollback.Id) == 0 && await receipts.CountDocumentsAsync(x => x.UserId == rollback.Id) == 0,
         "Injected grant failure rolls back debit, inventory, ledger and receipt");
-    // Actual collab configuration, isolated database and synthetic wallets only.
-    await KingdomRushCatalog.EnsureItemsAsync(db);
-    await KingdomRushCatalog.EnsureItemsAsync(db);
-    var krItems = await items.Find(i => i.UnityAssetKey == KingdomRushCatalog.AssetKey).ToListAsync();
-    Need(krItems.Count == 3 && krItems.All(i => i.ShopExclusive && !i.IsDefault), "Collab installer is idempotent: exactly three shop-exclusive products");
-    using var configJson = System.Text.Json.JsonDocument.Parse(File.ReadAllText("shop-catalog.json"));
-    var krOptions = System.Text.Json.JsonSerializer.Deserialize<ShopCatalogOptions>(configJson.RootElement.GetProperty("ShopCatalog").GetRawText())!;
-    var krShop = new ShopService(db, client, Options.Create(krOptions));
-    var offers = (await krShop.GetCatalogAsync()).Offers.Where(o => o.OfferId.StartsWith("kingdom-rush-", StringComparison.Ordinal)).ToList();
-    var standalone = offers.Where(o => !o.IsBundle).ToList();
-    var complete = offers.Single(o => o.OfferId == "kingdom-rush-complete");
-    Need(offers.Count == 4 && standalone.Count == 3 && standalone.All(o => o.DiscountPercent == 0), "Three separate full-price collab offers plus complete bundle; no basic-background sale");
-    Need(complete.IsBundle && complete.DiscountPercent == 25 && complete.Items.Count == 3 &&
-        complete.Items.Select(i => i.ItemId).ToHashSet().SetEquals(krItems.Select(i => i.Id.ToString())), "Complete collab bundle contains exactly the three products with 25 percent discount");
-    var unowned = new HashSet<string>();
-    Need(complete.Items.Sum(i => i.Golds) == 120000 && complete.Items.Sum(i => i.Diamonds) == 6000 &&
-        ShopCatalog.Quote(complete, unowned, "GOLDS").Price == 90000 && ShopCatalog.Quote(complete, unowned, "DIAMONDS").Price == 4500,
-        "Combined 120000 Gold / 6000 Diamonds becomes 90000 Gold / 4500 Diamonds");
-    Need(offers.SelectMany(o => o.Items).All(i => i.Golds > 6000 && i.Diamonds > 300), "Every collab product costs more than the previous most expensive skin");
-    var collector = await User(500000, 25000);
-    var invService = new InventoryService(db);
-    var bg = krItems.Single(i => i.Type == CosmeticLoadoutPolicy.BackgroundType);
-    try { await invService.EquipBackgroundAsync(collector.Id, bg.Id.ToString()); throw new Exception("Unowned background equipped"); }
-    catch (InvalidOperationException e) { Need(e.Message == "ITEM_NOT_OWNED", "Unowned paid background cannot be equipped"); }
-    foreach (var offer in standalone)
+    // Seed a genuine pre-split owner; startup migration must revoke only the two retired items.
+    var oldItems = KingdomRushCatalog.Definitions().Where(i => i.UnityAssetKey == KingdomRushCatalog.AssetKey).ToArray();
+    foreach (var item in oldItems) item.IsActive = true;
+    await items.InsertManyAsync(oldItems);
+    var oldOwner=await User(123456,7890);
+    foreach(var item in oldItems) await inventory.InsertOneAsync(new PlayerItem{UserId=oldOwner.Id,ItemId=item.Id,AcquiredSource="SHOP"});
+    var oldSet=oldItems.Single(i=>i.Type==CosmeticLoadoutPolicy.SetType);
+    var oldBoard=oldItems.Single(i=>i.Type==CosmeticLoadoutPolicy.BoardType);
+    var oldBg=oldItems.Single(i=>i.Type==CosmeticLoadoutPolicy.BackgroundType);
+    await users.UpdateOneAsync(u=>u.Id==oldOwner.Id,Builders<User>.Update.Set(u=>u.Equipped,new EquippedSkins{ChessSkinId=oldSet.Id,BoardSkinId=oldBoard.Id,BackgroundSkinId=oldBg.Id}));
+    await KingdomRushCatalog.EnsureItemsAsync(db); await KingdomRushCatalog.EnsureItemsAsync(db);
+    var krItems=await items.Find(i=>i.UnityAssetKey==KingdomRushCatalog.AssetKey||i.UnityAssetKey==KingdomRushCatalog.DenasKey||i.UnityAssetKey==KingdomRushCatalog.VeznanKey).ToListAsync();
+    Need(krItems.Count==9&&krItems.Count(i=>i.IsActive)==7&&krItems.All(i=>i.ShopExclusive&&i.Rarity=="LEGENDARY"),"Idempotent installer: six faction products, legacy Legendary background and two archived items");
+    var migrated=await users.Find(u=>u.Id==oldOwner.Id).SingleAsync();
+    var kept=await inventory.Find(i=>i.UserId==oldOwner.Id).ToListAsync();
+    Need(kept.Count==1&&kept[0].ItemId==oldBg.Id&&migrated.Equipped.ChessSkinId==null&&migrated.Equipped.BoardSkinId==null&&migrated.Equipped.BackgroundSkinId==oldBg.Id,"Retirement revokes only mixed board/set and unequips them, retaining owned/equipped old background");
+    Need(migrated.Wallet.Golds==123456&&migrated.Wallet.Diamonds==7890&&migrated.Wallet.Tickets==17&&await db.GetCollection<BsonDocument>("kingdom_rush_retired_ownership").CountDocumentsAsync(new BsonDocument())==2,"No compensation or currency change; exactly two original ownership records archived across retries");
+    var invService=new InventoryService(db);
+    Need((await invService.GetCatalogAsync()).All(i=>i.ItemId!=oldSet.Id.ToString()&&i.ItemId!=oldBoard.Id.ToString()),"Retired mixed items absent from public item catalog");
+    try { await invService.EquipItemAsync(oldOwner.Id,oldBoard.Id);throw new Exception("Retired item equipped"); }
+    catch(InvalidOperationException ex){Need(ex.Message=="ITEM_NOT_FOUND","Retired board cannot be equipped by stale clients");}
+    using var configJson=System.Text.Json.JsonDocument.Parse(File.ReadAllText("shop-catalog.json"));
+    var krOptions=System.Text.Json.JsonSerializer.Deserialize<ShopCatalogOptions>(configJson.RootElement.GetProperty("ShopCatalog").GetRawText())!;
+    var krShop=new ShopService(db,client,Options.Create(krOptions));
+    var offers=(await krShop.GetCatalogAsync()).Offers.Where(o=>o.OfferId.StartsWith("kingdom-rush-",StringComparison.Ordinal)).ToList();
+    Need(offers.Count==9&&offers.Count(o=>o.IsBundle)==2&&!offers.Any(o=>o.OfferId is "kingdom-rush-complete" or "kingdom-rush-pieces" or "kingdom-rush-board"),"Shop publishes only two faction bundles, six faction singles and legacy background");
+    var bgOffer=offers.Single(o=>o.OfferId=="kingdom-rush-background");
+    Need(bgOffer.Items.Single().Golds==6000&&bgOffer.Items.Single().Diamonds==300,"Legacy background reduced to 6000 Gold or 300 Diamonds");
+    foreach(var faction in new[]{"denas","veznan"})
     {
-        var product = offer.Items.Single();
-        var req = new ShopPurchaseRequest { RequestId = Guid.NewGuid(), OfferId = offer.OfferId, Currency = "GOLDS", ExpectedPrice = product.Golds, ExpectedItemIds = new() { product.ItemId } };
-        await krShop.PurchaseAsync(collector.Id, req); await krShop.PurchaseAsync(collector.Id, req);
+        var offer=offers.Single(o=>o.OfferId=="kingdom-rush-"+faction+"-complete");
+        Need(offer.IsBundle&&offer.Items.Count==3&&offer.DiscountPercent==25&&offer.Items.All(i=>i.UnityAssetKey=="kingdom_rush_"+faction)&&offer.Items.Sum(i=>i.Golds)==102000&&offer.Items.Sum(i=>i.Diamonds)==5100,"Exact three faction contents and new total for "+faction);
+        Need(ShopCatalog.Quote(offer,new HashSet<string>(),"GOLDS").Price==76500&&ShopCatalog.Quote(offer,new HashSet<string>(),"DIAMONDS").Price==3825,"25 percent bundle discount: 76500 Gold or 3825 Diamonds for "+faction);
+        foreach(var currency in new[]{"GOLDS","DIAMONDS"})
+        {
+            var buyer=await User(120000,6000);
+            var req=new ShopPurchaseRequest{RequestId=Guid.NewGuid(),OfferId=offer.OfferId,Currency=currency,ExpectedPrice=currency=="GOLDS"?76500:3825,ExpectedItemIds=offer.Items.Select(i=>i.ItemId).ToList()};
+            await krShop.PurchaseAsync(buyer.Id,req);await krShop.PurchaseAsync(buyer.Id,req);
+            var after=await users.Find(u=>u.Id==buyer.Id).SingleAsync();
+            Need(after.Wallet.Golds==(currency=="GOLDS"?43500:120000)&&after.Wallet.Diamonds==(currency=="DIAMONDS"?2175:6000)&&await inventory.CountDocumentsAsync(i=>i.UserId==buyer.Id)==3&&await receipts.CountDocumentsAsync(i=>i.UserId==buyer.Id)==1,"Exact debit, three grants and idempotent retry: "+faction+" "+currency);
+            var set=offer.Items.Single(i=>i.Type==CosmeticLoadoutPolicy.SetType);
+            var board=offer.Items.Single(i=>i.Type==CosmeticLoadoutPolicy.BoardType);
+            var bg=offer.Items.Single(i=>i.Type==CosmeticLoadoutPolicy.BackgroundType);
+            await invService.EquipBackgroundAsync(buyer.Id,bg.ItemId);
+            var equipped=await invService.EquipLoadoutAsync(buyer.Id,new ChessGame.Api.DTOs.Inventory.EquipLoadoutRequest{ChessSkinId=set.ItemId,BoardSkinId=board.ItemId});
+            Need(equipped.BackgroundSkinId.ToString()==bg.ItemId&&(await invService.GetUserInventoryAsync(buyer.Id)).All(i=>i.IsEquipped),"Faction equipment and independent background ownership preserved: "+faction+" "+currency);
+        }
+        var setId=offer.Items.Single(i=>i.Type==CosmeticLoadoutPolicy.SetType).ItemId;
+        Need(ShopCatalog.Quote(offer,new HashSet<string>{setId},"GOLDS").Price==31500&&ShopCatalog.Quote(offer,new HashSet<string>{setId},"DIAMONDS").Price==1575,"Partial ownership excludes set before 25 percent discount: "+faction);
     }
-    Need(await Gold(collector) == 500000 - standalone.Sum(o => o.Items.Single().Golds) &&
-        await inventory.CountDocumentsAsync(i => i.UserId == collector.Id) == 3, "Buying all collab items and retrying charges exactly once per item");
-    var bundleBuyer = await User(120000, 6000);
-    var bundleRequest = new ShopPurchaseRequest { RequestId = Guid.NewGuid(), OfferId = complete.OfferId, Currency = "GOLDS", ExpectedPrice = 90000,
-        ExpectedItemIds = complete.Items.Select(i => i.ItemId).ToList() };
-    await krShop.PurchaseAsync(bundleBuyer.Id, bundleRequest); await krShop.PurchaseAsync(bundleBuyer.Id, bundleRequest);
-    Need(await Gold(bundleBuyer) == 30000 && await inventory.CountDocumentsAsync(i => i.UserId == bundleBuyer.Id) == 3 &&
-        await receipts.CountDocumentsAsync(i => i.UserId == bundleBuyer.Id) == 1, "Full collab bundle grants all three products for one discounted Gold debit, including retry");
-    var diamondBuyer = await User(120000, 6000);
-    var diamondRequest = new ShopPurchaseRequest { RequestId = Guid.NewGuid(), OfferId = complete.OfferId, Currency = "DIAMONDS", ExpectedPrice = 4500,
-        ExpectedItemIds = complete.Items.Select(i => i.ItemId).ToList() };
-    var diamondReceipt = await krShop.PurchaseAsync(diamondBuyer.Id, diamondRequest);
-    Need(diamondReceipt.Wallet.Diamonds == 1500 && diamondReceipt.Wallet.Golds == 120000 && diamondReceipt.GrantedItemIds.Count == 3,
-        "Full collab bundle supports the exact 4500-Diamond alternative without spending Gold");
-    var ownedSet = complete.Items.Single(i => i.Type == CosmeticLoadoutPolicy.SetType).ItemId;
-    Need(ShopCatalog.Quote(complete, new HashSet<string> { ownedSet }, "GOLDS").Price == 45000 &&
-        ShopCatalog.Quote(complete, new HashSet<string> { ownedSet }, "DIAMONDS").Price == 2250,
-        "Already owned set is excluded before applying 25 percent discount to remaining board and background");
-    var equippedBg = await invService.EquipBackgroundAsync(collector.Id, bg.Id.ToString());
-    Need(equippedBg.BackgroundSkinId == bg.Id && CosmeticLoadoutPolicy.References(equippedBg).Single().Slot == "BACKGROUND", "Owned background equips and appears in frozen online loadout references");
-    var krSet = krItems.Single(i => i.Type == CosmeticLoadoutPolicy.SetType); var krBoard = krItems.Single(i => i.Type == CosmeticLoadoutPolicy.BoardType);
-    var equippedAll = await invService.EquipLoadoutAsync(collector.Id, new ChessGame.Api.DTOs.Inventory.EquipLoadoutRequest {
-        ChessSkinId = krSet.Id.ToString(), BoardSkinId = krBoard.Id.ToString() });
-    Need(equippedAll.BackgroundSkinId == bg.Id && CosmeticLoadoutPolicy.References(equippedAll).Count() == 3,
-        "Set/board equipment preserves independently purchased background");
-    Need((await invService.GetUserInventoryAsync(collector.Id)).All(i => i.IsEquipped), "Inventory marks all three collab categories equipped");
-    var resetBg = await invService.EquipBackgroundAsync(collector.Id, null);
-    Need(resetBg.BackgroundSkinId == null && resetBg.ChessSkinId == krSet.Id && resetBg.BoardSkinId == krBoard.Id,
-        "Restoring locked default background preserves set, board, wallet and ownership");
-    try { await invService.EquipBackgroundAsync(collector.Id, krBoard.Id.ToString()); throw new Exception("Board used as background"); }
-    catch (InvalidOperationException e) { Need(e.Message == "ITEM_NOT_EQUIPPABLE", "Board ownership cannot substitute for background ownership"); }
-    var banner = new GachaBanner { Code = "KR_EXCLUSION_FIXTURE", IsActive = true, PityGroup = "fixture", Pity = new() { Epic = 10, Legendary = 80 },
-        Costs = new() { new() { RollCount = 1, Currency = "TICKETS", Amount = 1 } }, Pool = new() { new() { ItemId = bg.Id, Weight = 1 } } };
-    await db.GetCollection<GachaBanner>("gacha_banners").InsertOneAsync(banner);
-    try { await new GachaService(db, client, invService).GetBannerAsync(banner.Code); throw new Exception("Shop exclusive accepted by gacha"); }
-    catch (GachaException e) { Need(e.Code == "BANNER_MISCONFIGURED", "Gacha rejects a shop-exclusive collab even if accidentally added to a banner"); }
+    foreach(var bg in krItems.Where(i=>i.IsActive))
+    {
+        var banner=new GachaBanner{Code="EXCLUDE_"+bg.Code,IsActive=true,PityGroup="fixture",Pity=new(){Epic=10,Legendary=80},Costs=new(){new(){RollCount=1,Currency="TICKETS",Amount=1}},Pool=new(){new(){ItemId=bg.Id,Weight=1}}};
+        await db.GetCollection<GachaBanner>("gacha_banners").InsertOneAsync(banner);
+        try{await new GachaService(db,client,invService).GetBannerAsync(banner.Code);throw new Exception("Shop exclusive in gacha");}
+        catch(GachaException ex){Need(ex.Code=="BANNER_MISCONFIGURED","Gacha rejects "+bg.Code);}
+    }
     File.WriteAllLines(Path.Combine(directory, "checks.txt"), checks);
     Console.WriteLine("SHOP_INTEGRATION_PASS " + checks.Count);
 }

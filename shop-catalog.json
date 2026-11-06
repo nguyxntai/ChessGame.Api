@@ -1,27 +1,36 @@
 {
   "ShopCatalog": {
     "Products": [
-      { "Id": "crystal", "Type": "CHESS_PIECE_SKIN", "UnityAssetKey": "ChessSets/CrystalBlue", "Golds": 2400, "Diamonds": 120 },
-      { "Id": "woodland", "Type": "CHESS_PIECE_SKIN", "UnityAssetKey": "ChessSets/Woodland", "Golds": 1800, "Diamonds": 90 },
-      { "Id": "forest", "Type": "BOARD_SKIN", "UnityAssetKey": "Boards/ForestGarden", "Golds": 1800, "Diamonds": 90 },
-      { "Id": "marble", "Type": "BOARD_SKIN", "UnityAssetKey": "Boards/ClassicMarble", "Golds": 1600, "Diamonds": 80 },
-      { "Id": "celestial", "Type": "BOARD_SKIN", "UnityAssetKey": "Boards/Celestial", "Golds": 6000, "Diamonds": 300 },
-      { "Id": "kingdom-rush-pieces", "Type": "CHESS_PIECE_SKIN", "UnityAssetKey": "kingdom_rush", "Golds": 60000, "Diamonds": 3000 },
-      { "Id": "kingdom-rush-board", "Type": "BOARD_SKIN", "UnityAssetKey": "kingdom_rush", "Golds": 36000, "Diamonds": 1800 },
-      { "Id": "kingdom-rush-background", "Type": "BACKGROUND_SKIN", "UnityAssetKey": "kingdom_rush", "Golds": 24000, "Diamonds": 1200 }
+      {"Id":"crystal","Type":"CHESS_PIECE_SKIN","UnityAssetKey":"ChessSets/CrystalBlue","Golds":2400,"Diamonds":120},
+      {"Id":"woodland","Type":"CHESS_PIECE_SKIN","UnityAssetKey":"ChessSets/Woodland","Golds":1800,"Diamonds":90},
+      {"Id":"forest","Type":"BOARD_SKIN","UnityAssetKey":"Boards/ForestGarden","Golds":1800,"Diamonds":90},
+      {"Id":"marble","Type":"BOARD_SKIN","UnityAssetKey":"Boards/ClassicMarble","Golds":1600,"Diamonds":80},
+      {"Id":"celestial","Type":"BOARD_SKIN","UnityAssetKey":"Boards/Celestial","Golds":6000,"Diamonds":300},
+      {"Id":"kingdom-rush-background","Type":"BACKGROUND_SKIN","UnityAssetKey":"kingdom_rush","Golds":6000,"Diamonds":300},
+      {"Id":"kingdom-rush-denas-pieces","Type":"CHESS_PIECE_SKIN","UnityAssetKey":"kingdom_rush_denas","Golds":60000,"Diamonds":3000},
+      {"Id":"kingdom-rush-denas-board","Type":"BOARD_SKIN","UnityAssetKey":"kingdom_rush_denas","Golds":36000,"Diamonds":1800},
+      {"Id":"kingdom-rush-denas-background","Type":"BACKGROUND_SKIN","UnityAssetKey":"kingdom_rush_denas","Golds":6000,"Diamonds":300},
+      {"Id":"kingdom-rush-veznan-pieces","Type":"CHESS_PIECE_SKIN","UnityAssetKey":"kingdom_rush_veznan","Golds":60000,"Diamonds":3000},
+      {"Id":"kingdom-rush-veznan-board","Type":"BOARD_SKIN","UnityAssetKey":"kingdom_rush_veznan","Golds":36000,"Diamonds":1800},
+      {"Id":"kingdom-rush-veznan-background","Type":"BACKGROUND_SKIN","UnityAssetKey":"kingdom_rush_veznan","Golds":6000,"Diamonds":300}
     ],
     "Offers": [
-      { "Id": "crystal", "Name": "Blue Crystal Chess Set", "Description": "A cool blue finish for every piece on the board. Includes both sides of the full set.", "Featured": true, "ProductIds": ["crystal"] },
-      { "Id": "woodland", "Name": "Woodland Chess Set", "Description": "Bring a little woodland charm to your next match. Includes both sides of the full set.", "ProductIds": ["woodland"] },
-      { "Id": "forest", "Name": "Forest Garden Board", "Description": "Your next match, in a quiet garden. A cosmetic board for every game mode.", "ProductIds": ["forest"] },
-      { "Id": "marble", "Name": "Classic Marble Board", "Description": "A timeless marble arena. The same game, with a fresh place to play.", "ProductIds": ["marble"] },
-      { "Id": "celestial", "Name": "Celestial Board", "Description": "A little wonder beneath every move. Includes the board's existing animated artwork.", "Featured": true, "ProductIds": ["celestial"] },
-      { "Id": "woodland-weekend", "Name": "Woodland Weekend", "Description": "The Woodland set and Forest Garden board, together. Pay only for the pieces of the bundle you still need.", "Featured": true, "DiscountPercent": 15, "ProductIds": ["woodland", "forest"] },
-      { "Id": "crystal-classics", "Name": "Crystal Classics", "Description": "Blue Crystal pieces meet Classic Marble. A complete new look for your next match.", "DiscountPercent": 15, "ProductIds": ["crystal", "marble"] },
-      { "Id": "kingdom-rush-pieces", "Name": "Kingdom Rush — Denas & Vez'Nan", "Description": "Premium collaboration. Includes all twelve Denas and Vez'Nan piece models for both sides. Board and background sold separately. Shop exclusive; unavailable through summons.", "Featured": true, "ProductIds": ["kingdom-rush-pieces"] },
-      { "Id": "kingdom-rush-board", "Name": "Kingdom Rush — Citadel Board", "Description": "Premium collaboration arena with 64 playable tiles and twelve prisoner pads. Pieces and background sold separately. Shop exclusive.", "Featured": true, "ProductIds": ["kingdom-rush-board"] },
-      { "Id": "kingdom-rush-background", "Name": "Kingdom Rush — Linirea Valley", "Description": "Premium collaboration landscape, sold separately. Equip with any board. Shop exclusive; unavailable through summons.", "Featured": true, "ProductIds": ["kingdom-rush-background"] },
-      { "Id": "kingdom-rush-complete", "Name": "Kingdom Rush — Complete Collection", "Description": "The full Denas & Vez'Nan chess set, Citadel Board and Linirea Valley background together. Save 25% on their combined price. Owned items are excluded before the discount. Shop exclusive; unavailable through summons.", "Featured": true, "DiscountPercent": 25, "ProductIds": ["kingdom-rush-pieces", "kingdom-rush-board", "kingdom-rush-background"] }
+      {"Id":"crystal","Name":"Blue Crystal Chess Set","Description":"A cool blue finish for every piece on the board. Includes both sides of the full set.","Featured":true,"ProductIds":["crystal"]},
+      {"Id":"woodland","Name":"Woodland Chess Set","Description":"Bring a little woodland charm to your next match. Includes both sides of the full set.","ProductIds":["woodland"]},
+      {"Id":"forest","Name":"Forest Garden Board","Description":"Your next match, in a quiet garden. A cosmetic board for every game mode.","ProductIds":["forest"]},
+      {"Id":"marble","Name":"Classic Marble Board","Description":"A timeless marble arena. The same game, with a fresh place to play.","ProductIds":["marble"]},
+      {"Id":"celestial","Name":"Celestial Board","Description":"A little wonder beneath every move. Includes the board's existing animated artwork.","Featured":true,"ProductIds":["celestial"]},
+      {"Id":"woodland-weekend","Name":"Woodland Weekend","Description":"The Woodland set and Forest Garden board, together. Pay only for the pieces of the bundle you still need.","Featured":true,"DiscountPercent":15,"ProductIds":["woodland","forest"]},
+      {"Id":"crystal-classics","Name":"Crystal Classics","Description":"Blue Crystal pieces meet Classic Marble. A complete new look for your next match.","DiscountPercent":15,"ProductIds":["crystal","marble"]},
+      {"Id":"kingdom-rush-background","Name":"Kingdom Rush — Linirea Valley","Description":"Premium collaboration landscape, sold separately. Equip with any board. Shop exclusive; unavailable through summons.","Featured":true,"ProductIds":["kingdom-rush-background"]},
+      {"Id":"kingdom-rush-denas-pieces","Name":"Kingdom Rush — Denas Royal Guard","Description":"The royal court and defenders of King Denas. Six sculpted characters with distinct light and dark team bases. Shop exclusive.","Featured":true,"ProductIds":["kingdom-rush-denas-pieces"]},
+      {"Id":"kingdom-rush-denas-board","Name":"Kingdom Rush — Denas Royal Citadel","Description":"Ivory limestone, royal blue and gold surround the battlefield. Includes twelve prisoner seats at the two ends. Shop exclusive.","Featured":true,"ProductIds":["kingdom-rush-denas-board"]},
+      {"Id":"kingdom-rush-denas-background","Name":"Kingdom Rush — Linirea Royal Heartlands","Description":"Lush Linirea woodland, rivers, bridges and royal outposts. Equip this landscape independently with any board. Shop exclusive.","Featured":true,"ProductIds":["kingdom-rush-denas-background"]},
+      {"Id":"kingdom-rush-denas-complete","Name":"Kingdom Rush — Denas Complete Collection","Description":"Faction pieces, arena and background. Save 25%; owned items are excluded before discount. Direct shop purchase only.","Featured":true,"DiscountPercent":25,"ProductIds":["kingdom-rush-denas-pieces","kingdom-rush-denas-board","kingdom-rush-denas-background"]},
+      {"Id":"kingdom-rush-veznan-pieces","Name":"Kingdom Rush — Vez'Nan Dark Dominion","Description":"Vez'Nan and his dark legion. Six sculpted characters with distinct light and dark team bases. Shop exclusive.","Featured":true,"ProductIds":["kingdom-rush-veznan-pieces"]},
+      {"Id":"kingdom-rush-veznan-board","Name":"Kingdom Rush — Vez'Nan Ruin Throne","Description":"Obsidian, violet heraldry and soul fire surround the battlefield. Includes twelve prisoner seats at the two ends. Shop exclusive.","Featured":true,"ProductIds":["kingdom-rush-veznan-board"]},
+      {"Id":"kingdom-rush-veznan-background","Name":"Kingdom Rush — Vez'Nan Scorched Dominion","Description":"Burned woodland, shattered settlements and soul fissures beneath a ruined realm. Equip independently with any board. Shop exclusive.","Featured":true,"ProductIds":["kingdom-rush-veznan-background"]},
+      {"Id":"kingdom-rush-veznan-complete","Name":"Kingdom Rush — Vez'Nan Complete Collection","Description":"Faction pieces, arena and background. Save 25%; owned items are excluded before discount. Direct shop purchase only.","Featured":true,"DiscountPercent":25,"ProductIds":["kingdom-rush-veznan-pieces","kingdom-rush-veznan-board","kingdom-rush-veznan-background"]}
     ]
   }
 }

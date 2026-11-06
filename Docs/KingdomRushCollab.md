@@ -1,21 +1,24 @@
-# Kingdom Rush shop release
+# Kingdom Rush faction collections
 
-Three independent shop-exclusive LEGENDARY products use the exact Unity key `kingdom_rush`:
+The public shop sells two independent Legendary, shop-exclusive collections with Unity keys `kingdom_rush_denas` and `kingdom_rush_veznan`.
 
-| Code | Type | Gold | Diamonds |
-| --- | --- | ---: | ---: |
-| CHESS_KINGDOM_RUSH | CHESS_PIECE_SKIN | 60,000 | 3,000 |
-| BOARD_KINGDOM_RUSH | BOARD_SKIN | 36,000 | 1,800 |
-| BACKGROUND_KINGDOM_RUSH | BACKGROUND_SKIN | 24,000 | 1,200 |
+| Product, per faction | Gold | Diamonds |
+| --- | ---: | ---: |
+| Chess set | 60,000 | 3,000 |
+| Board | 36,000 | 1,800 |
+| Background | 6,000 | 300 |
+| Complete bundle (25% off 102,000 / 5,100) | **76,500** | **3,825** |
 
-`shop-catalog.json` supplies one featured standalone full-price offer per product, plus `kingdom-rush-complete` (Kingdom Rush — Complete Collection). The bundle includes all three products and discounts their combined 120,000 Gold / 6,000 Diamonds by 25% to **90,000 Gold / 4,500 Diamonds**. It is featured in the shop and Bundles category. Existing ownership is excluded before the 25% discount, following the shop's standard partial-bundle rules. The complete twelve-model chess set covers Denas White and Vez'Nan Black. Classic background is never a sale product. Neither the bundle nor its items enter gacha.
+Offer IDs: `kingdom-rush-{denas,veznan}-{pieces,board,background,complete}`. Each complete bundle has exactly the three corresponding faction products. Owned items are excluded before discount using the existing purchase policy. No product enters gacha. The original `kingdom-rush-background` remains 6,000 Gold / 300 Diamonds, still Legendary.
 
-Startup calls `KingdomRushCatalog.EnsureItemsAsync`. It prechecks code/ID/category/key conflicts, preserves IDs of existing matching records, and idempotently upserts exactly three catalog items. Stable new IDs end in `...000001`, `...000002`, `...000003` under prefix `6b0c4f010000000000`. It never changes wallets, player inventory, existing prices, ratings or banner pools. `shopExclusive` defaults false for old BSON documents. Gacha pool validation and readiness diagnostics reject any shop-exclusive item.
+`KingdomRushCatalog.EnsureItemsAsync` idempotently installs nine catalog records: six new faction items, one active legacy background and two inactive mixed items. Stable new IDs use prefix `6b0c4f0100000000000000`, suffixes 11/12/13 for Denas and 21/22/23 for Vez'Nan. Existing matching records retain their IDs. All remain shop-exclusive, including archived records. Complete conflict checks precede mutation.
 
-`EquippedSkins.backgroundSkinId` is nullable and defaults null for existing users. `CosmeticLoadoutPolicy.References` includes it with slot `BACKGROUND`, so online snapshots retain the current user's validated background. Unity uses its own player's background rather than copying the opponent's.
+The user explicitly authorized pre-release revocation of the original combined set and board without compensation. A startup MongoDB transaction archives original ownership documents in `kingdom_rush_retired_ownership`, removes only those ownership rows and clears the corresponding equipped chess/board IDs. It preserves background ownership/equipment, wallets, other inventory and purchase history. Archive IDs are unchanged, so reruns cannot duplicate them. The old catalog records are inactive; mixed offers and the original complete bundle are withdrawn. Unity retains their art/addressables for a future mode outside ordinary shop/inventory.
 
-Authenticated `PUT /api/inventory/background` accepts `{ "itemId": "<owned ID>" }` or `{ "itemId": null }` to restore Classic. It checks active item, category, ownership and active account. No purchase is made by equipping. The regular equip endpoint also accepts owned background items. Custom/set equipment updates write only set/board/mode/piece fields, preserving background even during concurrent requests.
+The three existing item categories, purchase receipts, independent background equipment and frozen online loadout references are reused. No new item type or purchase pipeline is introduced. Classic background remains a locked non-sale default, restored by null background equipment.
 
-Validation on 2026-11-06: the local replica-set `Tools/ShopVerification` run passed 29 checks, including all three standalone purchases, complete bundle purchases with either currency, response retries, partial-ownership pricing, ownership rejection, independent equipment/reset, catalog idempotency and gacha exclusion. All database writes used isolated synthetic accounts; no production wallet or ownership was changed. .NET 8 regression suite from the initial collab release: 360 pass; one existing `UserProfileTests.PatchThenGetReturnsUnitySnapshotWithoutChangingProtectedData` assertion expects legacy Elo1510 while response uses rating1500. The same failure was reproduced from clean HEAD before this release, outside the worktree. It is not changed here.
+Verification on 2026-11-06: `Tools/ShopVerification` passed 41 tests on an isolated MongoDB replica set with synthetic accounts, including repeated retirement, archived ownership, unchanged balances/backgrounds, retired equip rejection, both currencies for both faction bundles, retries, partial ownership and gacha rejection for all seven active products. Related .NET tests passed 37/37. No real-account purchase was used for verification.
 
-Unity content requires the paired client update in `D:/Game_Project/Chesss-but-Weird`. Old clients hide unknown catalog artwork instead of buying a missing skin. Local Unity verifies real built Addressables, models, grid, rails, camera, captures, promotion visuals, release/reload and locked/default versus paid background UI. No authenticated two-client match or production purchase is claimed by these fixtures.
+The paired Unity update is in `D:/Game_Project/Chesss-but-Weird`; see `Documentation/KingdomRushFactions.md`. Production ownership revocation is an intentional authorized deployment action, separate from synthetic verification.
+
+Full .NET8 regression: 360 passed, excluding the previously reproduced baseline stale Elo assertion in UserProfileTests.PatchThenGetReturnsUnitySnapshotWithoutChangingProtectedData. No rating code was modified.
