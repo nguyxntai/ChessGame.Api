@@ -246,6 +246,14 @@ Snapshot có board (ID quân ổn định, kind/team/square/hasMoved/forward), t
 clocks/serverTime, stateVersion, eventSequence, ready/presence/loadout, draw offer, result và CHAOS.
 Draft options của đối phương bị ẩn; buff đã chọn và hiệu ứng gameplay công khai.
 
+Snapshot CHAOS có catalog công khai tùy chọn `chaos.buffDefinitions`:
+`[{id,tier,displayName,description,summary}]` cho 26 buff online v2; không lộ roll
+của đối phương. `description` đầy đủ, `summary` ngắn; thiếu summary thì client
+lấy câu đầu của mô tả online. Tier: Silver/Gold/Diamond/Legendary. Catalog chỉ
+được thêm vào snapshot, không lưu BSON, không đổi protocol/rules version (1/2).
+`SelectBuff` vẫn được kiểm tra theo draftOptions của người gửi. Unity lưu mặc
+định Full/Summary trong Settings cục bộ, chỉ áp dụng màn draft.
+
 1. Đăng ký callback tất cả event trước khi mở kết nối; buffer event theo matchId/sequence.
 2. Reconnect bằng JWT hợp lệ, gọi `SubscribeMatch(matchId)`.
 3. Thay state bằng `response.state`, đặt watermark `response.resumeAfterSequence`.
