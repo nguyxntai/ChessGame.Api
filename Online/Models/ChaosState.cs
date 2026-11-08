@@ -3,6 +3,9 @@ namespace ChessGame.Api.Online;
 public sealed class ChaosState
 {
     public int RulesVersion { get; set; } = 2;
+    // Added by the snapshot projection, never stored with the match.
+    [MongoDB.Bson.Serialization.Attributes.BsonIgnore]
+    public IReadOnlyList<ChaosBuffDefinition> BuffDefinitions { get; set; } = Array.Empty<ChaosBuffDefinition>();
     public string Phase { get; set; } = "Draft";
     public DateTime SetupDeadline { get; set; }
     public List<ChaosSide> Sides { get; set; } = new();

@@ -28,6 +28,7 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ch
         if (m.Status == "InProgress") { if (m.Turn == "White") white -= Elapsed(m, now); else black -= Elapsed(m, now); }
         string fen = FenCodec.Write(GameRules.Read(m));
         var custom = m.Chaos is null ? null : OnlineJson.Clone(m.Chaos);
+        if (custom is not null) custom.BuffDefinitions = ChaosBuffCatalog.Definitions;
         if (custom is not null && userId is not null)
             foreach (var s in custom.Sides) if (s.Team != m.Players.Single(p => p.UserId == userId).Color) s.DraftOptions.Clear();
         return new(m.Id, m.Status, m.Settings, m.StateVersion, m.EventSequence, now, m.Turn,
