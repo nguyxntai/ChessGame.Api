@@ -10,4 +10,11 @@ public sealed class ChaosPieceEffect
     public int? SniperUntil { get; set; }
     public int? InfectedUntil { get; set; }
     public bool Passenger { get; set; }
+    public int PassengerReady { get; set; }
+    public ChaosPieceEffect? PassengerTraits { get; set; }
+    public bool Commandant { get; set; }
+    public bool QueenMastery { get; set; }
+    public bool TrapPawn { get; set; }
+    public bool PromotedQueen { get; set; }
+    public int BetrayalChecks { get; set; }
 }

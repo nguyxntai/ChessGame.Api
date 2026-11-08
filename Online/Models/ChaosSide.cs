@@ -28,5 +28,16 @@ public sealed class ChaosSide
     public bool PeaceFailed { get; set; }
     public bool PeaceUsed { get; set; }
     public bool SubstituteUsed { get; set; }
+    public int? FreestyleKnight { get; set; }
+    public int CastledWings { get; set; }
+    public bool Initialized { get; set; }
+    public bool DoppelDisabled { get; set; }
+    public int? DisguisedBuffId { get; set; }
+    public int Credit { get; set; }
+    public bool BoughtThisTurn { get; set; }
+    public bool QueenRefundUsed { get; set; }
+    public bool QuestPromoted { get; set; }
+    public bool QuestRewarded { get; set; }
+    public List<string> QuestCaptures { get; set; } = new();
     public List<ChaosPieceEffect> Effects { get; set; } = new();
 }

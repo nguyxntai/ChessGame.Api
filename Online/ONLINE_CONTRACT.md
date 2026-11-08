@@ -1,6 +1,7 @@
 # Online .NET — hợp đồng và kiểm tra thủ công
 
-Ngày triển khai: 03/10/2026; cập nhật rank/Chaos: 18/10/2026. Protocol REST/SignalR: `1`; luật Chaos: `2`.
+Protocol REST/SignalR: `1`; trận Chaos mới dùng luật `3` (35 buff, đồng bộ practice).
+Trận đã lưu luật `2` tiếp tục dùng engine/catalog 26 buff, không chuyển luật giữa trận.
 
 Rank, JSON mẫu, migration và checklist mới: [Rank và chuyển đổi Chaos](../Documentation/ranks-and-chaos.md).
 Phải hoàn tất migration offline trước khi chạy bản backend này trên dữ liệu cũ.
@@ -36,18 +37,18 @@ trong `Services` vẫn là các phần của cùng một class `OnlineService`.
 ## Nguồn luật và phạm vi client
 
 Engine Classic trong `Online/Domain` được lấy từ
-`D:/Stuurdy/Chesss-but-Weird/Packages/com.chessbutweird.domain/Runtime`.
-Các buff và kỹ năng Chaos giữ nguyên từ nguồn Unity hiện có. Các tên nguồn tham chiếu
+`D:/Game_Project/Chesss-but-Weird/Packages/com.chessbutweird.domain/Runtime`.
+Movement và balance v3 đồng bộ từ `AramRules.cs` và `AramBalanceRules.cs` của Unity.
+Các tên nguồn tham chiếu
 `AramBuffDefinition.cs`, `AramBuffRuntime.cs`, `AramBuffRuntime.Extended.cs`,
-`AramBuffRuntime.Rifle.cs` và `ChessGame.Aram.cs` là tên legacy của Unity; phiên này không sửa Unity.
-CHAOS v2 dùng 26 buff của chế độ local hiện tại; giao thức online cũ của Unity chỉ dùng 6 buff.
+`AramBuffRuntime.Rifle.cs` và `ChessGame.Aram.cs` là tên legacy của Unity.
+Deploy API cùng bản Unity hỗ trợ luật 3 để có đủ thao tác cho 35 buff.
 
 Unity hiện đã dùng OnlineRestService, OnlineSession và SignalRGameTransport cho .NET; transport WebSocket cũ đã được loại bỏ. Luồng menu mới được mô tả ở mục Online menu update và tài liệu Unity liên kết bên dưới.
 Swagger dùng để kiểm tra REST; các hub method cần client SignalR để gọi thủ công.
 
-Không tạo/chạy test tự động, không chạy server, không gọi API hay ghi dữ liệu MongoDB để kiểm thử.
-Chỉ build kiểm tra biên dịch. Kết quả build không xác nhận hoạt động transaction, hai client,
-reconnect hay tính đúng của từng buff trong môi trường chạy thật.
+Kiểm thử engine/snapshot chạy độc lập MongoDB; Unity fixture dùng snapshot thật từ
+engine với transport/account giả lập. Các kiểm tra này không thay thế trận thật hai client.
 
 ## Chạy backend
 
@@ -208,7 +209,8 @@ Tham khảo [tài liệu xác thực SignalR của Microsoft](https://learn.micr
 | RespondRematch | matchId, accept |
 
 Move body: `{"from":"e2","to":"e4","promotion":null}`.
-Promotion bắt buộc khi tốt tới hàng cuối, dùng `Queen`, `Rook`, `Bishop`, `Knight`.
+Promotion dùng `Queen`, `Rook`, `Bishop`, `Knight`; v3 Double-edged Trap chặn phong cấp
+và không gửi promotion. Unity lấy lựa chọn hợp lệ từ `chaos.legalMoves` của server.
 Tọa độ luôn canonical: a1 ở phía White, không gửi tọa độ đã xoay camera của Black.
 
 `SubmitMove`/`UseAbility`/resign/draw trả:
@@ -244,13 +246,14 @@ Rematch cần đồng ý hai phía trong 2 phút; dùng loadout mới, không t�
 
 Snapshot có board (ID quân ổn định, kind/team/square/hasMoved/forward), turn, quyền nhập thành/en passant,
 clocks/serverTime, stateVersion, eventSequence, ready/presence/loadout, draw offer, result và CHAOS.
-Draft options của đối phương bị ẩn; buff đã chọn và hiệu ứng gameplay công khai.
+Draft options của đối phương bị ẩn; buff đã chọn và hiệu ứng gameplay công khai,
+ngoại trừ danh tính và cặp quân của Doppelganger v3 được che khỏi đối thủ.
 
 Snapshot CHAOS có catalog công khai tùy chọn `chaos.buffDefinitions`:
-`[{id,tier,displayName,description,summary}]` cho 26 buff online v2; không lộ roll
+`[{id,tier,displayName,description,summary}]` cho 35 buff v3 hoặc 26 buff v2; không lộ roll
 của đối phương. `description` đầy đủ, `summary` ngắn; thiếu summary thì client
 lấy câu đầu của mô tả online. Tier: Silver/Gold/Diamond/Legendary. Catalog chỉ
-được thêm vào snapshot, không lưu BSON, không đổi protocol/rules version (1/2).
+được thêm vào snapshot, không lưu BSON. `chaos.rulesVersion` pin theo từng trận.
 `SelectBuff` vẫn được kiểm tra theo draftOptions của người gửi. Unity lưu mặc
 định Full/Summary trong Settings cục bộ, chỉ áp dụng màn draft.
 
@@ -272,34 +275,50 @@ Server chọn ngẫu nhiên một tier chung cho hai người; mỗi người đ
 chọn một buff. Mọi RNG/effect được tính trên server và lưu cùng command.
 Trong AwaitingReady vẫn gọi UseAbility với expectedVersion để draft/setup; gameplay chỉ bắt đầu khi xong setup.
 
-| ID | Buff | Cơ chế / command |
+| ID | Buff | Cơ chế / command v3 |
 | --- | --- | --- |
 | 0 | CommandantPawn | `SelectTargets` với 3 pawn ID; đi thẳng hai ô trống |
-| 1 | StrongFortress | Tự động; bỏ tối đa một loại hạn chế nhập thành, đích vẫn an toàn |
-| 2 | FreestyleLeap | Tự động; knight tới các ô trên tuyến L, không gồm chéo 2x2 |
-| 3 | Doppelganger | `SelectTargets` gồm một Knight và Bishop; `ToggleSwap` mỗi 5 lượt chủ |
+| 1 | StrongFortress | Nhập thành qua chiếu/đã đi; đích an toàn, đường trống, Rook chưa đi; mỗi cánh một lần |
+| 2 | FreestyleLeap | `SelectTargets` chọn một Knight được mở rộng tuyến L, không gồm chéo 2x2 |
+| 3 | Doppelganger | Knight/Bishop; `ToggleSwap`/`KeepSwap`/`ReselectSwap` mỗi 4 nước chung; đối thủ thấy Gold giả |
 | 4 | SuicideBomber | Queen gốc nổ một lần khi bị bắt, hủy quân không phải King trong 3x3, gồm capturer |
 | 5 | FlyingThunderGod | Queen gốc tới ô trống bằng SubmitMove; tối đa 5 teleport, cooldown 5 lượt |
-| 6 | NobleSacrifice | Pawn bắt pawn đồng minh rồi có Bloodthirsty |
-| 7 | AbsoluteSniper | Bishop bắt non-pawn từ >=4 ô lấy charge; `Snipe`, hết sau 5 lượt chủ |
-| 8 | GamblingLeadsToMisery | Pawn bắt địch: 30% thêm nước, cùng pawn, tối đa 2 lần |
-| 9 | LootBox | Crate ở round 25/50; nhận crate thì `Deploy` Rook/Queen trong nửa bàn của chủ |
-| 10 | PeaceTShirt | Sau 15 lượt không bị chiếu: `Recruit`, lấy non-King/non-Queen địch vào ba hàng đầu |
+| 6 | NobleSacrifice | Pawn ăn Pawn mình thành Bloodthirsty; không ăn đồng minh lần hai |
+| 7 | AbsoluteSniper | Bishop bắt non-Pawn từ >=4 ô lấy charge 4 nước chung; capture tiếp tự bắn không di chuyển |
+| 8 | GamblingLeadsToMisery | Pawn bắt địch: 25% thêm nước, cùng Pawn, tối đa 3 lần |
+| 9 | LootBox | Crate ở nước chung 25/50 bắt occupant, King chỉ miễn ở 25; `Deploy` Rook/Queen |
+| 10 | PeaceTShirt | Sau 14 nước chung không bị chiếu: `Recruit` vào ba hàng đầu, có thể thay Pawn khi đầy |
 | 11 | RiseOfPawn | Pawn lùi một ô trống; về hàng đáy thành mine, địch bước vào bị hủy |
-| 12 | MobileFortress | `LoadPawn` vào Rook; Rook chết thì `Deploy` pawn trong 3x3, hàng cuối thành Queen |
-| 13 | HidingKing | `HideKing` đổi chỗ với đồng minh hàng đáy; lúc đầu và mỗi 10 lượt chủ |
-| 14 | GachaBanner | Ticket chiến đấu từ capture; `BattleGacha` tối đa 2/lượt: 70/10/10/9/1% P/N/B/R/Q |
+| 12 | MobileFortress | `LoadPawn` trong 3x3; `UnloadPawn` từ lượt chủ tiếp theo; Rook chết thì parachute, giữ traits |
+| 13 | HidingKing | Opening `HideKing` vô điều kiện; sau đó cả hai ở hàng đáy, hồi 10 nước chung |
+| 14 | GachaBanner | Non-Pawn capture cho 1 ticket; `BattleGacha` tối đa 1/lượt, không thả quân gây chiếu |
 | 15 | SubstituteNinjutsu | Lần đầu bị chiếu: teleport King tới ô an toàn trong nửa bàn, để decoy |
-| 16 | HighTechEra | Rook gốc bắt qua đúng một blocker; mất cannon sau 10 lượt không bắn |
-| 17 | QueensBetrayal | Queen thêm ở hàng thứ ba; mỗi lượt chủ 10% đổi phía |
-| 18 | DefinitionOfChaos | Round 10/15 sụp cặp file ngoài; hủy quân trên ô sụp |
+| 16 | HighTechEra | Rook gốc bắt qua đúng một blocker; charge 10 nước chung, bắn làm mới charge |
+| 17 | QueensBetrayal | Mỗi nước chung 10% +5 điểm %; phản bội thành deployment của đối thủ trong 3 hàng đầu |
+| 18 | DefinitionOfChaos | Sụp cặp file sau lượt chủ 10, thêm 5 nước chung sụp cặp tiếp |
 | 19 | RngFiesta | Đổi quân ban đầu trừ King/Queen thành P/N/B/R ngẫu nhiên |
 | 20 | IFrameRoll | Khi checkmate: `Escape` tới ô an toàn trong 5x5 quanh King, tối đa 3 lần |
 | 21 | GhostArmy | Đi xuyên quân mình, không dùng xuyên để chiếu King địch |
-| 22 | PlagueTown | Capturer bị nhiễm và chết sau 4 lượt chủ tiếp theo, cả King/Queen |
+| 22 | PlagueTown | Capturer chết sau 4 nước chung tiếp theo; King thật miễn nhiễm |
 | 23 | CustomizeArmy | `ConfirmFormation` gửi toàn bộ vị trí quân trong nửa bàn; 120 giây, unchanged hoàn buff Gold |
 | 24 | PawnsRevolution | Giữ King; lấp nửa bàn còn lại bằng Pawn |
 | 25 | OneManArmy | Chỉ giữ King, đi thêm hai ô thẳng; `AimRifle`/`FireRifle`/`ExitRifle` |
+| 26 | EveryManForHimself | Capture cùng loại P/N/B/R/Q và promote; chọn 2 Pawn thành Queen hoặc đặt 1 Queen bất kỳ nếu thiếu Pawn; hòa thành thua |
+| 27 | SacUrQueen | Opening `ReplaceQueen` với `pieceKind` Rook/Bishop/Knight; sau 10 lượt chủ `RestoreQueen` chọn ally không phải King/promoted Queen |
+| 28 | AutoCastling | Nhập thành phải ngay setup, đổi blocker đồng minh vào các ô bỏ trống |
+| 29 | UltimateQuest | Non-Queen ăn Queen được thêm movement Queen vĩnh viễn |
+| 30 | MonsterTruck | Rook đi xuyên đồng minh tới ô trống; không bắt/chiếu xuyên blocker |
+| 31 | CreditCard | `BuyPiece` với `pieceKind` và `target` trong nửa bàn, 1/lượt; giá 2/4/4/5/10; được mua chịu khi balance không âm |
+| 32 | KingIsPoorPiece | King thành Queen; mất cả quân, hòa, hoặc chưa thắng sau lượt chủ 25 thì thua |
+| 33 | DoubleEdgedTrap | Pawn địch không promote; ở hàng cuối thành Pawn đi/bắt vuông góc 1 ô |
+| 34 | Paratrooper | Sau promote, `Deploy` chọn ô trống an toàn hoặc giữ ô hiện tại cho quân vừa promote |
+
+`combinedPlies` tăng mỗi nước đã chấp nhận, gồm bonus Pawn và sniper; setup, mua quân,
+triển khai và rifle không tăng. Snapshot v3 có `legalMoves: [{from,to,promotion}]`
+do server xác thực, không lưu BSON. `deployments[].action` là `Deploy`, `Redeploy`
+hoặc `QuestPawns`, cùng team, pieceId, remaining và phạm vi; reconnect giữ nguyên quyết định.
+V3 hòa theo 50 nước/3 lần lặp, áp dụng hòa-thành-thua của buff 26/32. Doppelganger
+được che trong REST, SignalR và replay, trong khi engine vẫn tính bằng buff thật.
 
 Ví dụ ability body:
 
@@ -308,7 +327,10 @@ Ví dụ ability body:
 {"kind":"SelectTargets","pieceIds":[12,14]}
 {"kind":"HideKing","targetPieceId":9}
 {"kind":"LoadPawn","pieceId":9,"targetPieceId":17}
-{"kind":"Snipe","pieceId":11,"targetPieceId":25}
+{"kind":"UnloadPawn","pieceId":9,"target":"c3"}
+{"kind":"ReplaceQueen","pieceKind":"Rook"}
+{"kind":"RestoreQueen","targetPieceId":17}
+{"kind":"BuyPiece","pieceKind":"Queen","target":"c3"}
 {"kind":"Recruit","targetPieceId":25,"target":"a3"}
 {"kind":"Deploy","target":"c2"}
 {"kind":"Escape","target":"e3"}
@@ -320,7 +342,7 @@ Ví dụ ability body:
 Formation phải gửi đủ quân của người dùng, ID/vị trí không trùng, không làm King mình bị chiếu;
 ví dụ một quân phía trên chỉ minh họa cấu trúc, không phải formation hợp lệ.
 Formation chưa gửi khi hết 120 giây dùng bố trí gốc, hoàn buff Gold theo luật hiện tại.
-Nếu Gold mới là Doppelganger thì vẫn cần SelectTargets trước setup deadline.
+Nếu Gold mới là Doppelganger/Hiding King thì vẫn cần hoàn tất setup mới trước deadline.
 Pending reinforcement chỉ cho chủ của deployment đầu tiên gọi Deploy; nước thường và kỹ năng khác đợi.
 Snapshot có `chaos.phase`, `sides`, `deployments`, `forcedPawn`, `escapeTeam`, `mines`, `crates`,
 `collapsedFiles`, effects theo pieceId, lượt chủ/cooldown/charges, và rifle session/deadline.

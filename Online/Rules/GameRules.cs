@@ -109,7 +109,12 @@ public sealed class GameRules(ChaosEngine chaos)
     }
     public static bool CanPossiblyMate(OnlineMatch match, string team)
     {
-        if (match.Chaos is not null) return match.Board.Any(p => p.Team == team && p.Kind == "King");
+        if (match.Chaos is not null)
+        {
+            if (match.Chaos.RulesVersion == 3 && match.Chaos.Sides.Any(s => s.Team == team && s.BuffId == 32))
+                return match.Board.Any(p => p.Team == team);
+            return match.Board.Any(p => p.Team == team && p.Kind == "King");
+        }
         var own = match.Board.Where(p => p.Team == team && p.Kind != "King").ToList();
         if (own.Count == 0 || IsDeadPosition(match.Board)) return false;
         if (own.Count == 1 && own[0].Kind is "Bishop" or "Knight" &&
