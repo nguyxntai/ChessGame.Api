@@ -28,9 +28,13 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ch
         if (m.Status == "InProgress") { if (m.Turn == "White") white -= Elapsed(m, now); else black -= Elapsed(m, now); }
         string fen = FenCodec.Write(GameRules.Read(m));
         var custom = m.Chaos is null ? null : OnlineJson.Clone(m.Chaos);
-        if (custom is not null) custom.BuffDefinitions = ChaosBuffCatalog.Definitions;
+        if (custom is not null)
+        {
+            custom.BuffDefinitions = ChaosBuffCatalog.ForRules(custom.RulesVersion);
+            if (custom.RulesVersion == 3) custom.LegalMoves = new Chaos35Engine().LegalMoves(m);
+        }
         if (custom is not null && userId is not null)
-            foreach (var s in custom.Sides) if (s.Team != m.Players.Single(p => p.UserId == userId).Color) s.DraftOptions.Clear();
+            ChaosPrivacy.Redact(custom, m.Players.Single(p => p.UserId == userId).Color);
         return new(m.Id, m.Status, m.Settings, m.StateVersion, m.EventSequence, now, m.Turn,
             m.Board.Select(p => new PieceSnapshot(p.Id, p.Kind, p.Team, p.Square, p.HasMoved, p.Forward)).ToList(),
             m.Chaos is null ? fen : null, fen.Split(' ')[2], m.EnPassantTarget, m.HalfMoveClock, m.FullMoveNumber,
@@ -254,6 +258,7 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ch
     private async Task Finish(IClientSessionHandle s, OnlineMatch m, string? winnerTeam, string reason, DateTime now, CancellationToken ct)
     {
         if (m.Status != "InProgress") return;
+        if (winnerTeam is null) winnerTeam = ChaosEngine.DrawWinner(m);
         ConsumeClock(m, now); m.ClockStartedAt = null; m.DrawOffer = null;
         m.Status = "Finished"; m.FinishedAt = now; m.StateVersion++;
         var result = new OfficialResult { Outcome = winnerTeam is null ? "Draw" : winnerTeam + "Win",

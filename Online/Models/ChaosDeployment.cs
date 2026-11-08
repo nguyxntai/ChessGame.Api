@@ -6,4 +6,9 @@ public sealed class ChaosDeployment
     public string Team { get; set; } = "";
     public string Kind { get; set; } = "Pawn";
     public string? Center { get; set; }
+    public string Action { get; set; } = "Deploy";
+    public int Ranks { get; set; } = 4;
+    public int? PieceId { get; set; }
+    public int Remaining { get; set; } = 1;
+    public ChaosPieceEffect? Traits { get; set; }
 }

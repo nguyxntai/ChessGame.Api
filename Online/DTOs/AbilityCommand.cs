@@ -7,6 +7,7 @@ public sealed record AbilityCommand
     public int? PieceId { get; init; }
     public int? TargetPieceId { get; init; }
     public string? Target { get; init; }
+    public string? PieceKind { get; init; }
     public List<int> PieceIds { get; init; } = new();
     public List<FormationPlacement> Formation { get; init; } = new();
     public double? Yaw { get; init; }

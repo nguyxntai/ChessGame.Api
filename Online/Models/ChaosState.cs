@@ -3,6 +3,12 @@ namespace ChessGame.Api.Online;
 public sealed class ChaosState
 {
     public int RulesVersion { get; set; } = 2;
+    public int CombinedPlies { get; set; }
+    public int CollapseSecondAt { get; set; } = -1;
+    public string? LastPositionKey { get; set; }
+    public int LastRecordedPly { get; set; } = -1;
+    [MongoDB.Bson.Serialization.Attributes.BsonIgnore]
+    public List<ChaosLegalMove>? LegalMoves { get; set; }
     // Added by the snapshot projection, never stored with the match.
     [MongoDB.Bson.Serialization.Attributes.BsonIgnore]
     public IReadOnlyList<ChaosBuffDefinition> BuffDefinitions { get; set; } = Array.Empty<ChaosBuffDefinition>();
@@ -21,3 +27,5 @@ public sealed class ChaosState
     // Geometry uses a1=(0,0,0), file=+X, rank=+Z, one tile=1 unit.
     public List<PieceHitbox> Hitboxes { get; set; } = new();
 }
+
+public sealed record ChaosLegalMove(string From, string To, string? Promotion = null);

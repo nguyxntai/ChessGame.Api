@@ -22,8 +22,13 @@ public static class OnlineJson
             if (obj["players"] is JsonArray players && obj["chaos"] is JsonObject chaos && chaos["sides"] is JsonArray sides)
             {
                 var color = players.OfType<JsonObject>().FirstOrDefault(p => (string?)p["userId"] == userId)?["color"]?.GetValue<string>();
-                foreach (var side in sides.OfType<JsonObject>())
-                    if ((string?)side["team"] != color) side["draftOptions"] = new JsonArray();
+                bool disguise = (int?)chaos["rulesVersion"] == 3 && sides.OfType<JsonObject>().Any(side => (string?)side["team"] != color && (int?)side["buffId"] == 3);
+                var state = chaos.Deserialize<ChaosState>(Options)!;
+                ChaosPrivacy.Redact(state, color);
+                obj["chaos"] = JsonSerializer.SerializeToNode(state, Options);
+                // Ability payloads can reveal a disguised pair even when the snapshot is redacted.
+                if (disguise && node.Parent is JsonObject envelope && envelope["command"] is JsonObject command &&
+                    (string?)command["kind"] is "SelectTargets" or "ToggleSwap" or "KeepSwap" or "ReselectSwap") envelope["command"] = null;
             }
             foreach (var property in obj.ToArray()) Redact(property.Value, userId);
         }
