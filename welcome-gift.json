@@ -1,0 +1,12 @@
+{
+  "WelcomeGift": {
+    "Enabled": true,
+    "Golds": 2000,
+    "Diamonds": 100,
+    "Tickets": 3,
+    "Sender": "Chess But Weird Team",
+    "Title": "Welcome to Chess But Weird!",
+    "Preview": "A small gift from the team to help you begin your journey.",
+    "Body": "Dear Tactician,\n\nThank you for joining Chess But Weird! We are excited to share matches full of strategy and surprises with you.\n\nTo help you get started, the team has sent you 2,000 Gold, 100 Diamonds and 3 Summon Tickets. Claim your gift right here in this letter!\n\nMay your moves be creative, your matches memorable and your adventures full of fun.\n\nWith thanks,\nThe Chess But Weird Team"
+  }
+}
