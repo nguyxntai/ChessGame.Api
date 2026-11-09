@@ -11,4 +11,7 @@ public sealed class ChaosDeployment
     public int? PieceId { get; set; }
     public int Remaining { get; set; } = 1;
     public ChaosPieceEffect? Traits { get; set; }
+    public int? VisualBuffId { get; set; }
+    public string? VisualFrom { get; set; }
+    public string? VisualOutcome { get; set; }
 }

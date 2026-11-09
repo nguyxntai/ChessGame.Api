@@ -33,7 +33,9 @@ internal sealed partial class Chaos35Engine
                 if (c.Kind == "ReselectSwap") { SelectTargets(m, s, c.PieceIds); s.SwapActive = true; }
                 else if (c.Kind == "ToggleSwap")
                 { Piece(m, s.SwappedKnight); Piece(m, s.SwappedBishop); s.SwapActive = !s.SwapActive; }
-                Require(!InCheck(m, team), "KingInCheck"); s.SwapReady = a.CombinedPlies + 4; break;
+                Require(!InCheck(m, team), "KingInCheck"); s.SwapReady = a.CombinedPlies + 4;
+                foreach(var id in new[]{s.SwappedKnight,s.SwappedBishop})if(id.HasValue){var p=Piece(m,id);Visual(m,3,p,GameRules.Square(p.Square),GameRules.Square(p.Square),s.SwapActive?"Exchanged":"Restored").OwnerOnly=true;}
+                break;
             case "HideKing":
                 Require(Has(s, 13) && a.CombinedPlies >= s.HidingReady); HideKing(m, s, c.TargetPieceId, false); break;
             case "LoadPawn":
@@ -42,13 +44,14 @@ internal sealed partial class Chaos35Engine
                 var e = Effect(m, rook); var traits = ReadEffect(m, pawn);
                 Require(rook.Team == team && rook.Kind == "Rook" && !e.Passenger && pawn.Team == team && pawn.Kind == "Pawn" && Nearby(rook, GameRules.Square(pawn.Square), 1), "InvalidAbilityTarget");
                 e.PassengerTraits = new() { Bloodthirsty = traits.Bloodthirsty, QueenMastery = traits.QueenMastery, TrapPawn = traits.TrapPawn, Commandant = traits.Commandant || s.CommandantPawns.Contains(pawn.Id) };
-                Remove(m, pawn, false); Require(!InCheck(m, team), "KingInCheck"); e.Passenger = true; e.PassengerReady = s.CompletedTurns + 1; break;
+                Remove(m, pawn, false); Require(!InCheck(m, team), "KingInCheck"); e.Passenger = true; e.PassengerReady = s.CompletedTurns + 1;
+                var load=Visual(m,12,rook,GameRules.Square(pawn.Square),GameRules.Square(rook.Square),"Embarked");load.Changes.Add(new(pawn.Id,team,pawn.Square,rook.Square,"Pawn",null));break;
             }
             case "UnloadPawn":
             {
                 Require(Has(s, 12)); var rook = Piece(m, c.PieceId); var e = Effect(m, rook); var to = GameRules.Square(c.Target);
                 Require(rook.Team == team && rook.Kind == "Rook" && e.Passenger && s.CompletedTurns >= e.PassengerReady && Nearby(rook, to, 1) && At(m, to) is null, "InvalidAbilityTarget");
-                var d = new ChaosDeployment { Team = team, Kind = "Pawn", Center = rook.Square, Traits = e.PassengerTraits };
+                var d = new ChaosDeployment { Team = team, Kind = "Pawn", Center = rook.Square, Traits = e.PassengerTraits,VisualBuffId=12,VisualFrom=rook.Square };
                 Require(DeploymentSquares(m, d).Contains(to), "InvalidAbilityTarget");
                 e.Passenger = false; e.PassengerTraits = null;
                 a.Deployments.Insert(0, d); ResolveDeployment(m, team, new() { Kind = "Deploy", Target = c.Target }); break;
@@ -62,22 +65,25 @@ internal sealed partial class Chaos35Engine
                     (occupant is null || full && occupant.Team == team && occupant.Kind == "Pawn"), "InvalidAbilityTarget");
                 string kind = victim.Kind; Remove(m, victim, false);
                 if (occupant is not null && occupant.Id != victim.Id) Remove(m, occupant);
-                Spawn(m, team, kind, to); Require(!InCheck(m, team), "KingInCheck"); s.PeaceUsed = true; break;
+                var recruit=Spawn(m, team, kind, to); Require(!InCheck(m, team), "KingInCheck"); s.PeaceUsed = true;
+                VisualChange(Visual(m,10,recruit,GameRules.Square(victim.Square),to,"Recruited"),recruit,victim.Square,kind,kind);break;
             }
             case "BattleGacha":
             {
                 Require(Has(s, 14) && s.Tickets > 0 && s.RollsThisTurn < 1);
                 int roll = Random(100); string kind = roll < 70 ? "Pawn" : roll < 80 ? "Knight" : roll < 90 ? "Bishop" : roll < 99 ? "Rook" : "Queen";
                 var squares = Empty(m).Where(to => CanPlace(m, team, kind, to, true)).ToList(); Require(squares.Count > 0, "InvalidAbilityTarget");
-                var p = Spawn(m, team, kind, Pick(squares)); s.Tickets--; s.RollsThisTurn++; Land(m, p, GameRules.Square(p.Square)); break;
+                var p = Spawn(m, team, kind, Pick(squares)); s.Tickets--; s.RollsThisTurn++;
+                VisualChange(Visual(m,14,p,GameRules.Square(p.Square),GameRules.Square(p.Square),"Summoned"),p,p.Square,null,kind);Land(m, p, GameRules.Square(p.Square));break;
             }
             case "RestoreQueen":
             {
                 Require(Has(s, 27) && s.CompletedTurns >= 10 && !s.QueenRefundUsed);
                 var p = Piece(m, c.TargetPieceId);
                 Require(p.Team == team && p.Kind != "King" && !ReadEffect(m, p).PromotedQueen, "InvalidAbilityTarget");
-                p.Kind = "Queen"; p.HasMoved = true; s.Effects.RemoveAll(e => e.PieceId == p.Id);
-                Require(!InCheck(m, team), "KingInCheck"); s.QueenRefundUsed = true; break;
+                string previous=p.Kind;p.Kind = "Queen"; p.HasMoved = true; s.Effects.RemoveAll(e => e.PieceId == p.Id);
+                Require(!InCheck(m, team), "KingInCheck"); s.QueenRefundUsed = true;
+                VisualChange(Visual(m,27,p,GameRules.Square(p.Square),GameRules.Square(p.Square),"Restored"),p,p.Square,previous,p.Kind);break;
             }
             case "BuyPiece":
             {
@@ -86,14 +92,16 @@ internal sealed partial class Chaos35Engine
                 Require(AramBalanceRules.CanPurchase(s.Credit, s.BoughtThisTurn, kind));
                 var to = GameRules.Square(c.Target);
                 Require(Home(to, team) && At(m, to) is null && CanPlace(m, team, c.PieceKind!, to), "InvalidAbilityTarget");
-                Spawn(m, team, kind.ToString(), to); s.Credit -= AramBalanceRules.PurchasePrice(kind); s.BoughtThisTurn = true; break;
+                var purchased=Spawn(m, team, kind.ToString(), to); s.Credit -= AramBalanceRules.PurchasePrice(kind); s.BoughtThisTurn = true;
+                var purchase=Visual(m,31,purchased,to,to,"Purchased");purchase.Amount=AramBalanceRules.PurchasePrice(kind);VisualChange(purchase,purchased,purchased.Square,null,purchased.Kind);break;
             }
             case "Escape":
             {
                 Require(Has(s, 20) && a.EscapeTeam == team && s.EscapeUses < 3);
                 var king = RealKing(m, team) ?? throw new OnlineException("InvalidAbilityTarget"); var to = GameRules.Square(c.Target);
                 Require(Available(m, to) && At(m, to) is null && Nearby(king, to, 2) && SafeRelocate(m, king, to), "InvalidAbilityTarget");
-                king.Square = to.ToString(); king.HasMoved = true; s.EscapeUses++; a.EscapeTeam = null; break;
+                var old=GameRules.Square(king.Square);king.Square = to.ToString(); king.HasMoved = true; s.EscapeUses++; a.EscapeTeam = null;
+                Visual(m,20,king,old,to,"Escape");break;
             }
             case "AimRifle":
                 Require(Has(s, 25) && s.CompletedTurns >= s.RifleReady && a.Rifle is null);
@@ -109,8 +117,10 @@ internal sealed partial class Chaos35Engine
         var king = RealKing(m, s.Team) ?? throw new OnlineException("InvalidAbilityTarget"); var ally = Piece(m, target);
         Require(ally.Team == s.Team && ally.Id != king.Id && GameRules.Square(ally.Square).Rank == Back(s.Team) &&
             (initial || GameRules.Square(king.Square).Rank == Back(s.Team)), "InvalidAbilityTarget");
-        SwapRelocate(m, king, GameRules.Square(ally.Square));
+        var from=GameRules.Square(king.Square);var destination=GameRules.Square(ally.Square);
+        SwapRelocate(m, king, destination);
         Require(initial || !InCheck(m, s.Team), "KingInCheck"); s.HidingReady = m.Chaos!.CombinedPlies + 10;
+        Visual(m,13,king,from,destination,"Swap");
     }
     public bool Tick(OnlineMatch original, DateTime now)
     {

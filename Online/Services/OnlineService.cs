@@ -31,7 +31,8 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ch
         if (custom is not null)
         {
             custom.BuffDefinitions = ChaosBuffCatalog.ForRules(custom.RulesVersion);
-            if (custom.RulesVersion == 3) custom.LegalMoves = new Chaos35Engine().LegalMoves(m);
+            ChaosVisualProjection.Fill(custom, m.Board);
+            if (custom.RulesVersion == 3) {custom.LegalMoves = new Chaos35Engine().LegalMoves(m);custom.LegalMoveTeam=m.Turn;}
         }
         if (custom is not null && userId is not null)
             ChaosPrivacy.Redact(custom, m.Players.Single(p => p.UserId == userId).Color);

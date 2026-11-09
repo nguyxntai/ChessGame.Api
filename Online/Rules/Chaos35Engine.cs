@@ -56,6 +56,7 @@ internal sealed partial class Chaos35Engine
     {
         s.Initialized = true; s.SetupComplete = !NeedsTargets(s.BuffId); s.SwapReady = Has(s, 3) ? m.Chaos!.CombinedPlies + 4 : 0;
         var army = m.Board.Where(p => p.Team == s.Team).ToList();
+        var visualBefore=army.Select(p=>OnlineJson.Clone(p)).ToList();
         if (Has(s, 24) || Has(s, 25))
         {
             foreach (var p in army.Where(p => p.Kind != "King")) Remove(m, p, false);
@@ -78,6 +79,7 @@ internal sealed partial class Chaos35Engine
         }
         if (Has(s, 32) && RealKing(m, s.Team) is { } poorKing) poorKing.Kind = "Queen";
         if (Has(s, 3)) s.DisguisedBuffId = Pick(Tiers[1].Where(id => id != 3).ToArray());
+        if(s.BuffId is 19 or 24 or 28 or 32)VisualArmy(m,s.BuffId.Value,s.Team,visualBefore,"Initialized");
     }
     private void Setup(OnlineMatch m, string team, AbilityCommand c, DateTime now)
     {
@@ -107,6 +109,7 @@ internal sealed partial class Chaos35Engine
                 {
                     Require(Has(s, 27) && c.PieceKind is "Rook" or "Bishop" or "Knight", "InvalidAbilityTarget");
                     var queen = Piece(m, s.OriginalQueen); queen.Kind = c.PieceKind!; s.OriginalQueen = null;
+                    VisualChange(Visual(m,27,queen,GameRules.Square(queen.Square),GameRules.Square(queen.Square),"Sacrificed"),queen,queen.Square,"Queen",queen.Kind);
                 }
                 else if (c.Kind == "HideKing") { Require(Has(s, 13), "InvalidAbility"); HideKing(m, s, c.TargetPieceId, true); }
                 else throw new OnlineException("InvalidAbility");
@@ -132,10 +135,14 @@ internal sealed partial class Chaos35Engine
             s.SwappedKnight = selected.Single(p => p.Kind == "Knight").Id; s.SwappedBishop = selected.Single(p => p.Kind == "Bishop").Id;
         }
         else throw new OnlineException("InvalidAbility");
+        if(selected.Count==0)return;
+        var anchor=selected[0];var cue=Visual(m,s.BuffId!.Value,anchor,GameRules.Square(anchor.Square),GameRules.Square(anchor.Square),"Selected");cue.OwnerOnly=s.BuffId==3;
+        foreach(var p in selected)VisualChange(cue,p,p.Square,p.Kind,p.Kind);
     }
     private void ConfirmFormation(OnlineMatch m, ChaosSide s, List<FormationPlacement> placements)
     {
         var army = m.Board.Where(p => p.Team == s.Team).ToList();
+        var visualBefore=army.Select(p=>OnlineJson.Clone(p)).ToList();
         Require(placements.Count == army.Count && placements.Select(p => p.PieceId).Distinct().Count() == army.Count &&
             placements.Select(p => p.Square).Distinct().Count() == army.Count && placements.All(p => army.Any(a => a.Id == p.PieceId)), "InvalidFormation");
         foreach (var p in placements) { var square = GameRules.Square(p.Square); Require(Available(m, square) && Home(square, s.Team) &&
@@ -145,6 +152,7 @@ internal sealed partial class Chaos35Engine
         bool unchanged = s.OriginalFormation.All(p => Piece(m, p.PieceId).Square == p.Square);
         s.FormationComplete = true; s.FormationDeadline = null;
         if (unchanged) { s.BuffId = Pick(Tiers[1]); InitialEffects(m, s); }
+        VisualArmy(m,23,s.Team,visualBefore,unchanged?"Refunded":"FormationApplied");
     }
     private void CompleteSetup(OnlineMatch m)
     {
