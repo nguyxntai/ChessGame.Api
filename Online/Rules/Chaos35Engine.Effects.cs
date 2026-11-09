@@ -17,10 +17,11 @@ internal sealed partial class Chaos35Engine
     {
         if (!m.Board.Remove(p)) return;
         var e = ReadEffect(m, p);
+        if(e.Decoy)Visual(m,15,p,GameRules.Square(p.Square),GameRules.Square(p.Square),"DecoyEnd");
         if (passenger && e.Passenger)
         {
             e.Passenger = false;
-            m.Chaos!.Deployments.Add(new() { Team = p.Team, Kind = "Pawn", Center = p.Square, Traits = e.PassengerTraits });
+            m.Chaos!.Deployments.Add(new() { Team = p.Team, Kind = "Pawn", Center = p.Square, Traits = e.PassengerTraits,VisualBuffId=12,VisualFrom=p.Square,VisualOutcome="Parachuted" });
         }
         if (explode) Detonate(m, p, GameRules.Square(p.Square));
     }
@@ -29,6 +30,10 @@ internal sealed partial class Chaos35Engine
         var s = Side(m, queen.Team);
         if (queen.Kind != "Queen" || !Has(s, 4) || s.OriginalQueen != queen.Id || s.BomberUsed) return;
         s.BomberUsed = true;
+        var cue = Visual(m, 4, queen, center, center);
+        for (int x = center.File - 1; x <= center.File + 1; x++)
+            for (int y = center.Rank - 1; y <= center.Rank + 1; y++)
+                if (Available(m, new(x, y))) cue.Tiles.Add(new Square(x, y).ToString());
         foreach (var p in m.Board.ToList()) if (p.Kind != "King" && Nearby(p, center, 1)) Remove(m, p);
     }
     private static void RewardCapture(OnlineMatch m, string team, OnlinePiece victim)
@@ -45,9 +50,10 @@ internal sealed partial class Chaos35Engine
         if (e.CannonUntil.HasValue && !MovementRules.IsPathClear(GameRules.Read(m).Board, from, to)) e.CannonUntil = AramBalanceRules.ExpiryAfterCapture(a.CombinedPlies, 10);
         if (victim.Team == p.Team) { if (Has(s, 6)) e.Bloodthirsty = true; return; }
         RewardCapture(m, p.Team, victim);
-        if ((p.Kind != "King" || e.Decoy) && Has(Side(m, victim.Team), 22)) e.InfectedUntil = AramBalanceRules.ExpiryAfterCapture(a.CombinedPlies, 4);
+        if ((p.Kind != "King" || e.Decoy) && Has(Side(m, victim.Team), 22))
+        {e.InfectedUntil = AramBalanceRules.ExpiryAfterCapture(a.CombinedPlies, 4);Visual(m,22,p,from,to,"Infect");}
         if (Has(s, 26) && p.Kind != "King" && p.Kind == victim.Kind && !s.QuestCaptures.Contains(p.Kind)) s.QuestCaptures.Add(p.Kind);
-        if (Has(s, 29) && p.Kind != "Queen" && victim.Kind == "Queen") e.QueenMastery = true;
+        if (Has(s, 29) && p.Kind != "Queen" && victim.Kind == "Queen") {e.QueenMastery = true;Visual(m,29,p,from,to,"Mastery");}
         if (Has(s, 7) && p.Kind == "Bishop" && victim.Kind != "Pawn" && Math.Max(Math.Abs(to.File - from.File), Math.Abs(to.Rank - from.Rank)) >= 4)
             e.SniperUntil = AramBalanceRules.ExpiryAfterCapture(a.CombinedPlies, 4);
     }
@@ -55,10 +61,11 @@ internal sealed partial class Chaos35Engine
     {
         if (!m.Board.Contains(p)) return;
         var a = m.Chaos!; var mine = a.Mines.FirstOrDefault(x => x.Square == to.ToString() && x.Team != p.Team);
-        if (mine is not null) { a.Mines.Remove(mine); Remove(m, p); return; }
+        if (mine is not null) { a.Mines.Remove(mine);Visual(m,11,p,to,to,"Trigger").Team=mine.Team;Remove(m, p); return; }
         var crate = a.Crates.FirstOrDefault(x => x.Square == to.ToString());
         if (crate is null) return;
         a.Crates.Remove(crate);
+        Visual(m,9,p,to,to,crate.Team==p.Team?"Claim":"Destroyed").Team=crate.Team;
         if (crate.Team == p.Team) a.Deployments.Add(new() { Team = p.Team, Kind = crate.Kind });
     }
     private static void Promoted(OnlineMatch m, OnlinePiece p)
@@ -66,14 +73,14 @@ internal sealed partial class Chaos35Engine
         var s = Side(m, p.Team); s.QuestPromoted = true;
         Effect(m, p).PromotedQueen = p.Kind == "Queen";
         QueueQuest(m, s);
-        if (Has(s, 34)) m.Chaos!.Deployments.Add(new() { Team = p.Team, Kind = p.Kind, Action = "Redeploy", PieceId = p.Id, Ranks = 0 });
+        if (Has(s, 34)) m.Chaos!.Deployments.Add(new() { Team = p.Team, Kind = p.Kind, Action = "Redeploy", PieceId = p.Id, Ranks = 0,VisualBuffId=34,VisualFrom=p.Square });
     }
     private static void QueueQuest(OnlineMatch m, ChaosSide s)
     {
         if (!Has(s, 26) || s.QuestRewarded || !s.QuestPromoted || s.QuestCaptures.Count < 5) return;
         s.QuestRewarded = true;
         bool two = m.Board.Count(p => p.Team == s.Team && p.Kind == "Pawn") >= 2;
-        m.Chaos!.Deployments.Add(new() { Team = s.Team, Kind = "Queen", Ranks = 0, Action = two ? "QuestPawns" : "Deploy", Remaining = two ? 2 : 1 });
+        m.Chaos!.Deployments.Add(new() { Team = s.Team, Kind = "Queen", Ranks = 0, Action = two ? "QuestPawns" : "Deploy", Remaining = two ? 2 : 1,VisualBuffId=26 });
     }
     private static void ObserveChecks(OnlineMatch m)
     {
@@ -88,7 +95,7 @@ internal sealed partial class Chaos35Engine
             var e = Effect(m, p);
             if (e.SniperUntil <= a.CombinedPlies) e.SniperUntil = null;
             if (e.CannonUntil <= a.CombinedPlies) e.CannonUntil = null;
-            if (e.InfectedUntil <= a.CombinedPlies) Remove(m, p);
+            if (e.InfectedUntil <= a.CombinedPlies) {Visual(m,22,p,GameRules.Square(p.Square),GameRules.Square(p.Square),"Expire");Remove(m, p);}
         }
         if (a.CombinedPlies <= 14) foreach (var s in a.Sides) if (InCheck(m, s.Team)) s.PeaceFailed = true;
         foreach (var s in a.Sides)
@@ -101,7 +108,11 @@ internal sealed partial class Chaos35Engine
         {
             var e = Effect(m, p);
             if (Random(100) < (int)Math.Round(100 * AramBalanceRules.BetrayalChance(e.BetrayalChecks)))
-            { Remove(m, p); a.Deployments.Add(new() { Team = GameRules.Other(p.Team), Kind = "Queen", Ranks = 3 }); }
+            {
+                Visual(m, 17, p, GameRules.Square(p.Square), GameRules.Square(p.Square), "Betrayal");
+                Remove(m, p); a.Deployments.Add(new() { Team = GameRules.Other(p.Team), Kind = "Queen", Ranks = 3,
+                    VisualFrom = p.Square, VisualBuffId = 17 });
+            }
             else e.BetrayalChecks++;
         }
         foreach (int milestone in new[] { 25, 50 }) if (a.CombinedPlies >= milestone && !a.LootRounds.Contains(milestone))
@@ -116,6 +127,7 @@ internal sealed partial class Chaos35Engine
                 var to = Pick(eligible); var victim = At(m, to);
                 if (victim is not null) { RewardCapture(m, s.Team, victim); Remove(m, victim); }
                 a.Crates.Add(new() { Team = s.Team, Kind = milestone == 25 ? "Rook" : "Queen", Square = to.ToString() });
+                Visual(m,9,new OnlinePiece{Team=s.Team},to,to,"Drop");
             }
         }
         CheckCollapse(m);
@@ -129,6 +141,9 @@ internal sealed partial class Chaos35Engine
     }
     private void Collapse(OnlineMatch m)
     {
+        var cue=Visual(m,18,new OnlinePiece{Team="White"},new(0,0),new(0,0),"Collapse");
+        int file=m.Chaos!.CollapsedFiles-1;
+        foreach(int x in new[]{file,7-file})for(int y=0;y<8;y++)cue.Tiles.Add(new Square(x,y).ToString());
         foreach (var p in m.Board.ToList()) if (!Available(m, GameRules.Square(p.Square))) Remove(m, p);
         m.Chaos!.Mines.RemoveAll(c => !Available(m, GameRules.Square(c.Square)));
         m.Chaos.Crates.RemoveAll(c => !Available(m, GameRules.Square(c.Square)));
@@ -143,7 +158,7 @@ internal sealed partial class Chaos35Engine
             if (king is not null)
             {
                 var from = GameRules.Square(king.Square); var safe = Empty(m, m.Turn).Where(to => SafeRelocate(m, king, to)).ToList();
-                if (safe.Count > 0) { king.Square = Pick(safe).ToString(); king.HasMoved = true; Effect(m, Spawn(m, m.Turn, "King", from)).Decoy = true; }
+                if (safe.Count > 0) { king.Square = Pick(safe).ToString(); king.HasMoved = true; Effect(m, Spawn(m, m.Turn, "King", from)).Decoy = true;Visual(m,15,king,from,GameRules.Square(king.Square),"Substitute"); }
             }
         }
         PruneDecisions(m);
@@ -183,12 +198,15 @@ internal sealed partial class Chaos35Engine
         {
             var pawn = At(m, to)!; pawn.Kind = "Queen"; pawn.HasMoved = true;
             Side(m, team).Effects.RemoveAll(e => e.PieceId == pawn.Id); Effect(m, pawn).PromotedQueen = true;
+            VisualChange(Visual(m,26,pawn,to,to,"QuestReward"),pawn,pawn.Square,"Pawn","Queen");
             if (--d.Remaining > 0) return;
         }
-        else if (d.Action == "Redeploy") { var piece = Piece(m, d.PieceId); piece.Square = to.ToString(); piece.HasMoved = true; }
+        else if (d.Action == "Redeploy") { var piece = Piece(m, d.PieceId);string from=piece.Square;piece.Square = to.ToString(); piece.HasMoved = true;VisualChange(Visual(m,34,piece,GameRules.Square(from),to,"Landed"),piece,from,piece.Kind,piece.Kind); }
         else
         {
             string kind = DeploymentKind(m, d, to); var p = Spawn(m, team, kind, to);
+            if (d.VisualBuffId == 17 && d.VisualFrom is not null) Visual(m, 17, p, GameRules.Square(d.VisualFrom), to, "Transferred");
+            if(d.VisualBuffId is 12 or 26)VisualChange(Visual(m,d.VisualBuffId.Value,p,GameRules.Square(d.VisualFrom??p.Square),to,d.VisualOutcome??(d.VisualBuffId==12?"Disembarked":"QuestReward")),p,d.VisualFrom??p.Square,null,p.Kind);
             if (d.Traits is { } traits)
             {
                 var e = Effect(m, p); e.QueenMastery = traits.QueenMastery;

@@ -40,7 +40,8 @@ public sealed class UserProfileTests
         Assert.Equal(api.User.Username, snapshot.Username);
         Assert.Equal(api.User.Email, snapshot.Email);
         Assert.Equal(api.User.Wallet.Golds, snapshot.Wallet.Golds);
-        Assert.Equal(api.User.Stats.Elo, snapshot.Stats.Elo);
+        // Profile snapshots expose the authoritative Classic rating; legacy Stats.Elo is retained in storage.
+        Assert.Equal(ChessGame.Api.Services.Ratings.RatingPolicies.Display(api.User.Ratings.Classic.Rating), snapshot.Stats.Elo);
         Assert.Equal(api.User.Equipped.ChessSkinId.ToString(), snapshot.Equipped.ChessSkinId);
 
         var after = api.User.ToBsonDocument();

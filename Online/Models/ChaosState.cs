@@ -26,6 +26,17 @@ public sealed class ChaosState
     public RifleSession? Rifle { get; set; }
     // Geometry uses a1=(0,0,0), file=+X, rank=+Z, one tile=1 unit.
     public List<PieceHitbox> Hitboxes { get; set; } = new();
+    public long VisualSequence { get; set; }
+    // Bounded durable tail: snapshots/replays can recover confirmed cues without a second transport.
+    public List<ChaosVisualCue> VisualCues { get; set; } = new();
+    [MongoDB.Bson.Serialization.Attributes.BsonIgnore]
+    public List<ChaosVisualStatus> VisualStatuses { get; set; } = new();
+    [MongoDB.Bson.Serialization.Attributes.BsonIgnore]
+    public List<ChaosBoardVisual> VisualBoard { get; set; } = new();
+    [MongoDB.Bson.Serialization.Attributes.BsonIgnore]
+    public List<ChaosVisualHud> VisualHud { get; set; } = new();
+    [MongoDB.Bson.Serialization.Attributes.BsonIgnore]
+    public string? LegalMoveTeam { get; set; }
 }
 
 public sealed record ChaosLegalMove(string From, string To, string? Promotion = null);

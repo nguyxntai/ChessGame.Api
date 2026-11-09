@@ -60,16 +60,42 @@ internal sealed partial class Chaos35Engine
             s.CastledWings |= move.To.File == 6 ? 1 : 2;
         }
         if (captured is not null) Detonate(m, captured, move.To);
-        if (e.Decoy && captured is not null && !allied && m.Board.Contains(moving)) { e.Decoy = false; moving.Kind = captured.Kind; }
+        if (e.Decoy && captured is not null && !allied && m.Board.Contains(moving)) { Visual(m,15,moving,move.To,move.To,"DecoyEnd");e.Decoy = false; moving.Kind = captured.Kind; }
         if (promotion && m.Board.Contains(moving)) { moving.Kind = move.Promotion!.Value.ToString(); Promoted(m, moving); }
         if (moving.Kind == "Pawn" && m.Board.Contains(moving))
         {
             if (Has(Side(m, GameRules.Other(moving.Team)), 33) && move.To.Rank == (moving.Forward > 0 ? 7 : 0)) e.TrapPawn = true;
             if (Has(s, 11) && move.To.Rank == Back(moving.Team) && move.To.Rank - move.From.Rank == -moving.Forward)
-            { Remove(m, moving, false); a.Mines.Add(new() { Team = moving.Team, Square = move.To.ToString() }); }
+            { Remove(m, moving, false); a.Mines.Add(new() { Team = moving.Team, Square = move.To.ToString() });Visual(m,11,moving,move.To,move.To,"Arm"); }
         }
         if (!snipe) Land(m, moving, move.To);
         if (InCheck(m, moving.Team)) return false;
+        if(!simulate)
+        {
+            if(source.Id==s.FreestyleKnight)Visual(m,2,moving,move.From,move.To,"Leap");
+            if(castle&&Has(s,1))
+            {
+                var cue=Visual(m,1,moving,move.From,move.To,"Castle");VisualChange(cue,moving,move.From.ToString(),"King","King");
+                var rook=At(m,new(move.To.File==6?5:3,move.From.Rank))!;VisualChange(cue,rook,new Square(move.To.File==6?7:0,move.From.Rank).ToString(),"Rook","Rook");
+            }
+            if(e.TrapPawn&&!sourceEffect.TrapPawn)Visual(m,33,moving,move.From,move.To,"Transformed");
+            if(teleport)Visual(m,5,moving,move.From,move.To,"Teleport");
+            bool line=move.From.File==move.To.File||move.From.Rank==move.To.Rank||Math.Abs(move.To.File-move.From.File)==Math.Abs(move.To.Rank-move.From.Rank);
+            if(!pattern&&line&&(Has(s,21)||Has(s,30)&&source.Kind=="Rook"))
+            {
+                var crossed=new List<string>();int dx=Math.Sign(move.To.File-move.From.File),dy=Math.Sign(move.To.Rank-move.From.Rank);
+                for(int x=move.From.File+dx,y=move.From.Rank+dy;x!=move.To.File||y!=move.To.Rank;x+=dx,y+=dy)
+                {var cell=new Square(x,y);if(At(original,cell)?.Team==moving.Team)crossed.Add(cell.ToString());}
+                if(crossed.Count>0)Visual(m,Has(s,21)?21:30,moving,move.From,move.To,"Phase").Tiles=crossed;
+            }
+        }
+        if (!simulate && captured is not null)
+        {
+            if (allied && source.Kind == "Pawn" && e.Bloodthirsty) Visual(m, 6, moving, move.From, move.To);
+            if (snipe) Visual(m, 7, moving, move.From, move.To);
+            if (sourceEffect.CannonUntil > original.Chaos!.CombinedPlies &&
+                !MovementRules.IsPathClear(board, move.From, move.To)) Visual(m, 16, moving, move.From, move.To);
+        }
         m.EnPassantTarget = !snipe && pieceState.Kind == PieceKind.Pawn && !sourceEffect.TrapPawn && Math.Abs(move.To.Rank - move.From.Rank) == 2
             ? new Square(move.From.File, (move.From.Rank + move.To.Rank) / 2).ToString() : "-";
         m.HalfMoveClock = pieceState.Kind == PieceKind.Pawn || captured is not null ? 0 : m.HalfMoveClock + 1;
@@ -81,7 +107,7 @@ internal sealed partial class Chaos35Engine
             if (HasLegalMove(m))
             {
                 AdvancePly(m);
-                if (m.Board.Contains(moving)) { s.ExtraUses++; RecordPosition(m); return true; }
+                if (m.Board.Contains(moving)) { s.ExtraUses++;Visual(m,8,moving,move.From,move.To,"ExtraMove").Amount=1;RecordPosition(m);return true; }
             }
             a.ForcedPawn = null;
         }

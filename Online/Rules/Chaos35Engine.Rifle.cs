@@ -21,8 +21,14 @@ internal sealed partial class Chaos35Engine
                 new[] { square.File + box.HalfWidth, box.Height, square.Rank + box.HalfDepth });
             if (hit is not null && hit < distance) { distance = hit.Value; nearest = p; }
         }
-        if (nearest is not null && nearest.Team != side.Team && nearest.Kind is not ("King" or "Queen"))
-        { RewardCapture(m, side.Team, nearest); Remove(m, nearest); }
+        bool hitEnemy = nearest is not null && nearest.Team != side.Team && nearest.Kind is not ("King" or "Queen");
+        var king = RealKing(m, side.Team)!;
+        var cue = Visual(m, 25, king, GameRules.Square(king.Square), GameRules.Square(nearest?.Square ?? king.Square),
+            hitEnemy ? "Hit" : nearest is not null || distance < 500 ? "Blocked" : "Miss");
+        cue.Origin = origin;
+        cue.Impact = Enumerable.Range(0, 3).Select(i => origin[i] + direction[i] * Math.Min(distance, 12)).ToArray();
+        if (hitEnemy)
+        { RewardCapture(m, side.Team, nearest!); Remove(m, nearest!); }
         a.Rifle = null; side.RifleReady = side.CompletedTurns + 3;
     }
     private static double? RayBox(double[] origin, double[] dir, double[] min, double[] max)
