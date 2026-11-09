@@ -154,6 +154,14 @@ builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<InventoryService>();
 builder.Services.AddScoped<GachaService>();
 builder.Services.AddScoped<WalletService>();
+builder.Configuration.Sources.Insert(0, new JsonConfigurationSource
+{
+    Path = "welcome-gift.json", FileProvider = builder.Environment.ContentRootFileProvider, Optional = false, ReloadOnChange = false
+});
+builder.Services.AddOptions<ChessGame.Api.Services.Mailbox.WelcomeGiftOptions>()
+    .Bind(builder.Configuration.GetSection("WelcomeGift"))
+    .Validate(o => o.IsValid(), "Welcome gift configuration is invalid.").ValidateOnStart();
+builder.Services.AddScoped<ChessGame.Api.Services.Mailbox.MailboxService>();
 builder.Configuration.AddJsonFile("shop-catalog.json", optional: false, reloadOnChange: false);
 builder.Services.Configure<ChessGame.Api.Services.Shop.ShopCatalogOptions>(builder.Configuration.GetSection("ShopCatalog"));
 builder.Services.AddScoped<ChessGame.Api.Services.Shop.ShopService>();
@@ -260,6 +268,7 @@ using (var scope = app.Services.CreateScope())
     await refreshTokenService.EnsureIndexesAsync();
     await scope.ServiceProvider.GetRequiredService<GachaService>().EnsureIndexesAsync();
     await scope.ServiceProvider.GetRequiredService<WalletService>().EnsureIndexesAsync();
+    await scope.ServiceProvider.GetRequiredService<ChessGame.Api.Services.Mailbox.MailboxService>().EnsureIndexesAsync();
     await scope.ServiceProvider.GetRequiredService<ChessGame.Api.Services.Shop.ShopService>().EnsureIndexesAsync();
     await ChessGame.Api.Services.Shop.KingdomRushCatalog.EnsureItemsAsync(scope.ServiceProvider.GetRequiredService<IMongoDatabase>());
     await scope.ServiceProvider.GetRequiredService<OnlineStore>().EnsureIndexesAsync();
