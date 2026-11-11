@@ -5,17 +5,17 @@ using MongoDB.Driver;
 namespace ChessGame.Api.Services.Shop;
 
 // Stable catalog installation and explicit pre-release retirement of the mixed set/board.
-// Keeps art/history and the original Legendary background; never changes wallets or banners.
+// Keeps art/history; never changes wallets or banners.
 public static class KingdomRushCatalog
 {
     public const string AssetKey = "kingdom_rush";
     public const string DenasKey = "kingdom_rush_denas", VeznanKey = "kingdom_rush_veznan";
-    public static readonly string[] RetiredCodes = { "CHESS_KINGDOM_RUSH", "BOARD_KINGDOM_RUSH" };
+    public static readonly string[] RetiredCodes = { "CHESS_KINGDOM_RUSH", "BOARD_KINGDOM_RUSH", "BACKGROUND_KINGDOM_RUSH" };
     public static IReadOnlyList<Item> Definitions() => new[]
     {
         Product("6b0c4f010000000000000001", "CHESS_KINGDOM_RUSH", "Kingdom Rush — Denas & Vez'Nan (Archived)", CosmeticLoadoutPolicy.SetType, AssetKey, false),
         Product("6b0c4f010000000000000002", "BOARD_KINGDOM_RUSH", "Kingdom Rush — Citadel Board (Archived)", CosmeticLoadoutPolicy.BoardType, AssetKey, false),
-        Product("6b0c4f010000000000000003", "BACKGROUND_KINGDOM_RUSH", "Kingdom Rush — Linirea Valley", CosmeticLoadoutPolicy.BackgroundType, AssetKey),
+        Product("6b0c4f010000000000000003", "BACKGROUND_KINGDOM_RUSH", "Kingdom Rush — Linirea Valley (Archived)", CosmeticLoadoutPolicy.BackgroundType, AssetKey, false),
         Product("6b0c4f010000000000000011", "CHESS_KINGDOM_RUSH_DENAS", "Kingdom Rush — Denas Royal Guard", CosmeticLoadoutPolicy.SetType, DenasKey),
         Product("6b0c4f010000000000000012", "BOARD_KINGDOM_RUSH_DENAS", "Kingdom Rush — Denas Royal Citadel", CosmeticLoadoutPolicy.BoardType, DenasKey),
         Product("6b0c4f010000000000000013", "BACKGROUND_KINGDOM_RUSH_DENAS", "Kingdom Rush — Linirea Royal Heartlands", CosmeticLoadoutPolicy.BackgroundType, DenasKey),
@@ -79,6 +79,8 @@ public static class KingdomRushCatalog
                 Builders<User>.Update.Set(u=>u.Equipped.ChessSkinId,null),cancellationToken:ct);
             await users.UpdateManyAsync(transaction,Builders<User>.Filter.In(u=>u.Equipped.BoardSkinId,retired.Select(i=>(ObjectId?)i)),
                 Builders<User>.Update.Set(u=>u.Equipped.BoardSkinId,null),cancellationToken:ct);
+            await users.UpdateManyAsync(transaction,Builders<User>.Filter.In(u=>u.Equipped.BackgroundSkinId,retired.Select(i=>(ObjectId?)i)),
+                Builders<User>.Update.Set(u=>u.Equipped.BackgroundSkinId,null),cancellationToken:ct);
             await ownership.DeleteManyAsync(transaction,filter,cancellationToken:ct);
             return old.Count;
         },cancellationToken:token);

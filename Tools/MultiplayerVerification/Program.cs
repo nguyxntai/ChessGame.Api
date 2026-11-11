@@ -74,6 +74,35 @@ try
         foreach (var id in ids) await service.SetReady(id, match.MatchId, default);
         return await service.State(ids[0], match.MatchId, default);
     }
+    {
+        var ids = await Users();
+        var boards = new[] { new Item { Code = "TEST_DENAS", Type = "BOARD_SKIN", UnityAssetKey = "kingdom_rush_denas", IsActive = true },
+            new Item { Code = "TEST_VEZNAN", Type = "BOARD_SKIN", UnityAssetKey = "kingdom_rush_veznan", IsActive = true } };
+        await store.Items.InsertManyAsync(boards);
+        for (int i = 0; i < 2; i++)
+        {
+            var id = ObjectId.Parse(ids[i]);
+            await store.PlayerItems.InsertOneAsync(new PlayerItem { UserId = id, ItemId = boards[i].Id });
+            await store.Users.UpdateOneAsync(u => u.Id == id, Builders<User>.Update.Set(u => u.Equipped.BoardSkinId, boards[i].Id)
+                .Set(u => u.Equipped.BackgroundSkinId, ObjectId.GenerateNewId()));
+        }
+        var room = await service.CreateRoom(ids[0], new CreateRoomRequest { RequestId = "shared-board" }, default);
+        await service.JoinRoom(ids[1], room.Code, default);
+        var match = await service.StartRoom(ids[0], room.RoomId, default);
+        var chosen = match.SharedBoardAssetKey;
+        Check(boards.Any(b => b.UnityAssetKey == chosen), "Shared board was not chosen from the two loadouts.");
+        Check(match.Players.All(p => p.Loadout.All(l => l.Type != "BACKGROUND_SKIN")), "Multiplayer includes a personal background.");
+        // A late equipment change cannot invalidate the models already being loaded by both clients.
+        await store.Users.UpdateOneAsync(u => u.Id == ObjectId.Parse(ids[0]), Builders<User>.Update.Set(u => u.Equipped.BoardSkinId, (ObjectId?)null));
+        foreach (var id in ids) await service.SetReady(id, match.MatchId, default);
+        foreach (var id in ids)
+        {
+            var state = await service.State(id, match.MatchId, default);
+            Check(state.Status == "InProgress" && state.SharedBoardAssetKey == chosen, "Ready/reconnect changed the shared board.");
+        }
+        Check(match.Players.Select(p => p.Color).Distinct().Count() == 2, "Random assignment duplicated a color.");
+        Console.WriteLine("PASS server random colors/shared board, background exclusion, frozen loadout and reconnect persistence");
+    }
     foreach (string mode in new[] { "Classic", "Chaos" })
     {
         var ids = await Users();

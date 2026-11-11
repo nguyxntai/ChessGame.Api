@@ -60,6 +60,7 @@ public sealed record MailResponse(string MailId, string UserId, string? Campaign
 public sealed record MailPage(int Page, int PageSize, long Total, long UnreadCount, long UnclaimedCount, List<MailResponse> Items);
 public sealed record MailEnrollment(bool Created, MailResponse? Mail);
 public sealed record MailClaimReceipt(string ReceiptId, string MailId, DateTime ClaimedAtUtc, PlayerWallet Wallet);
+public sealed record MailClaimAllReceipt(int ClaimedCount, List<MailAttachment> Rewards, PlayerWallet Wallet);
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed class MailClaimRequest { }
 public sealed class MailboxException(string code) : Exception(code) { public string Code { get; } = code; }

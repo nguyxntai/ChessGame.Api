@@ -14,6 +14,8 @@ public sealed class MailboxController(MailboxService mailbox) : ControllerBase
     [HttpGet] public Task<IActionResult> List([FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken ct = default) =>
         Run(async id => await mailbox.ListAsync(id, page, pageSize, ct));
     [HttpPost("enroll")] public Task<IActionResult> Enroll(CancellationToken ct) => Run(async id => await mailbox.EnrollAsync(id, ct));
+    [HttpPost("claim-all")] public Task<IActionResult> ClaimAll([FromBody] MailClaimRequest request, CancellationToken ct) =>
+        Run(async id => await mailbox.ClaimAllAsync(id, ct));
     [HttpGet("{mailId}")] public Task<IActionResult> Get(string mailId, CancellationToken ct) => Run(async id => await mailbox.GetAsync(id, mailId, ct));
     [HttpPost("{mailId}/read")] public Task<IActionResult> Read(string mailId, CancellationToken ct) => Run(async id => await mailbox.ReadAsync(id, mailId, ct));
     [HttpPost("{mailId}/claim")] public Task<IActionResult> Claim(string mailId, [FromBody] MailClaimRequest request, CancellationToken ct) =>
