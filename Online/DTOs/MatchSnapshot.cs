@@ -5,4 +5,4 @@ public sealed record MatchSnapshot(string MatchId, string Status, GameSettings S
     string CastlingRights, string EnPassantTarget, int HalfMoveClock, int FullMoveNumber,
     ClockSnapshot Clocks, List<PlayerSnapshot> Players, DateTime ReadyDeadline, DrawOffer? DrawOffer,
     ChaosState? Chaos, OfficialResult? Result, string? RematchId, bool Rated = false, DateTime? AcceptDeadline = null,
-    List<CapturedPiece>? Captures = null);
+    List<CapturedPiece>? Captures = null, string? CheckedTeam = null);

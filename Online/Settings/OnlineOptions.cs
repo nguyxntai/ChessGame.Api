@@ -17,5 +17,6 @@ public sealed class OnlineOptions
     public int CandidatesPerPool { get; set; } = 128;
     public int RecentOpponentSeconds { get; set; } = 600;
     public int RecentOpponentRelaxSeconds { get; set; } = 60;
+    public int SmallPoolRelaxSeconds { get; set; } = 5;
     public int MaximumLatencyDifferenceMilliseconds { get; set; } = 150;
 }

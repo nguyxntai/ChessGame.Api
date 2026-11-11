@@ -9,6 +9,7 @@ public sealed class OnlineTicket
     public string RequestId { get; set; } = "";
     public GameSettings Settings { get; set; } = new();
     public int Rating { get; set; }
+    public bool Rated { get; set; }
     public string PoolKey { get; set; } = "";
     public bool Provisional { get; set; } = true;
     public double? RoundTripMilliseconds { get; set; }

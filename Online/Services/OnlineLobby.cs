@@ -17,7 +17,7 @@ public sealed partial class OnlineService
             var previous = await store.Tickets.Find(s, x => x.UserId == userId && x.RequestId == request.RequestId).FirstOrDefaultAsync(token);
             if (previous is not null)
             {
-                if (previous.Settings != settings) throw new OnlineException("RequestIdConflict");
+                if (previous.Settings != settings || previous.Rated != request.Rated) throw new OnlineException("RequestIdConflict");
                 await ExpireTicket(s, previous, now, token); return Ticket(previous);
             }
             // Lazily release an expired queue seat even before the background sweep sees it.
@@ -25,7 +25,7 @@ public sealed partial class OnlineService
             if (current is not null) await ExpireTicket(s, current, now, token);
             await AvailableAsync(s, userId, token);
             var ticket = new OnlineTicket { UserId = userId, RequestId = request.RequestId, Settings = settings,
-                PoolKey = MatchmakingPolicy.PoolKey(settings), Provisional = user.Ratings.For(settings.Mode).Provisional,
+                Rated = request.Rated, PoolKey = MatchmakingPolicy.PoolKey(settings, request.Rated), Provisional = user.Ratings.For(settings.Mode).Provisional,
                 Rating = ChessGame.Api.Services.Ratings.RatingPolicies.Display(user.Ratings.For(settings.Mode).Rating), CreatedAt = now, ExpiresAt = now.AddSeconds(config.QueueSeconds) };
             await store.Seats.InsertOneAsync(s, new OnlineSeat { UserId = userId, Kind = "Ticket", ReferenceId = ticket.Id }, cancellationToken: token);
             await store.Tickets.InsertOneAsync(s, ticket, cancellationToken: token);
@@ -85,10 +85,10 @@ public sealed partial class OnlineService
     {
         // Bounded migration also handles queued tickets written by the previous server version.
         var legacy = await store.Tickets.Find(s, Builders<OnlineTicket>.Filter.Eq(x => x.Status, "Queued") &
-            (Builders<OnlineTicket>.Filter.Eq(x => x.PoolKey, "") | Builders<OnlineTicket>.Filter.Eq(x => x.PoolKey, null))).Limit(200).ToListAsync(ct);
+            Builders<OnlineTicket>.Filter.Not(Builders<OnlineTicket>.Filter.Regex(x => x.PoolKey, new BsonRegularExpression("^(Ranked|Normal):")))).Limit(200).ToListAsync(ct);
         foreach (var ticket in legacy)
         {
-            ticket.PoolKey = MatchmakingPolicy.PoolKey(ticket.Settings);
+            ticket.PoolKey = MatchmakingPolicy.PoolKey(ticket.Settings, ticket.Rated);
             await store.Tickets.UpdateOneAsync(s, x => x.Id == ticket.Id, Builders<OnlineTicket>.Update.Set(x => x.PoolKey, ticket.PoolKey), cancellationToken: ct);
             await RegisterPool(s, ticket.PoolKey, ct);
         }
@@ -148,7 +148,7 @@ public sealed partial class OnlineService
             candidates.RemoveAll(x => x.Status != "Queued");
             var keys = new List<string>();
             for (int i = 0; i < candidates.Count; i++) for (int j = i + 1; j < candidates.Count; j++)
-                if (MatchmakingPolicy.Cost(candidates[i], candidates[j], now, config, 0, null) is not null)
+                if (candidates[i].Rated && MatchmakingPolicy.Cost(candidates[i], candidates[j], now, config, 0, null, candidates.Count == 2) is not null)
                     keys.Add(MatchmakingPolicy.PairKey(candidates[i].UserId, candidates[j].UserId));
             var recent = await store.Matches.Aggregate(s).Match(new BsonDocument {
                 { "SettlementPairKey", new BsonDocument("$in", new BsonArray(keys)) }, { "Result.RatingApplied", true },
@@ -158,7 +158,7 @@ public sealed partial class OnlineService
             var planned = PairingPlanner.Match(candidates.Count, (i, j) => {
                 var a = candidates[i]; var b = candidates[j];
                 pairs.TryGetValue(MatchmakingPolicy.PairKey(a.UserId, b.UserId), out var previous);
-                return MatchmakingPolicy.Cost(a, b, now, config, previous?["count"].AsInt32 ?? 0, previous?["last"].ToUniversalTime());
+                return MatchmakingPolicy.Cost(a, b, now, config, previous?["count"].AsInt32 ?? 0, previous?["last"].ToUniversalTime(), candidates.Count == 2);
             });
             foreach (var (i, j) in planned)
             {
@@ -166,7 +166,7 @@ public sealed partial class OnlineService
                 var quality = new MatchmakingDiagnostics { RatingGap = Math.Abs(a.Rating - b.Rating),
                     MaximumWaitSeconds = Math.Max((now - a.CreatedAt).TotalSeconds, (now - b.CreatedAt).TotalSeconds),
                     BothProvisional = a.Provisional && b.Provisional, MixedPlacement = a.Provisional != b.Provisional };
-                var m = await CreateMatch(s, new() { a.UserId, b.UserId }, a.Settings, true, now, ct, quality);
+                var m = await CreateMatch(s, new() { a.UserId, b.UserId }, a.Settings, a.Rated, now, ct, quality, requiresAcceptance: true);
                 quality.WhiteRoundTripMilliseconds = m.Players[0].UserId == a.UserId ? a.RoundTripMilliseconds : b.RoundTripMilliseconds;
                 quality.BlackRoundTripMilliseconds = m.Players[1].UserId == a.UserId ? a.RoundTripMilliseconds : b.RoundTripMilliseconds;
                 await Save(s, m, ct);
@@ -239,11 +239,15 @@ public sealed partial class OnlineService
             await UserAsync(s, userId, token);
             var room = await store.Rooms.Find(s, r => r.Code == code).FirstOrDefaultAsync(token) ?? throw new OnlineException("RoomNotFound", 404);
             if (room.Status != "Open" || room.ExpiresAt <= DateTime.UtcNow) throw new OnlineException("RoomClosed");
-            if (room.Members.Contains(userId)) return Room(room);
-            await AvailableAsync(s, userId, token);
-            if (room.Members.Count >= 2) throw new OnlineException("RoomFull");
+            bool alreadyJoined = room.Members.Contains(userId);
+            if (!alreadyJoined && room.Members.Count >= 2) throw new OnlineException("RoomFull");
+            await AvailableAsync(s, userId, token, room.Id);
+            // A retry can encounter a reserved seat before membership was
+            // repaired on an older deployment. Reuse the same seat identity.
+            await store.Seats.ReplaceOneAsync(s, x => x.UserId == userId,
+                new OnlineSeat { UserId = userId, Kind = "Room", ReferenceId = room.Id }, new ReplaceOptions { IsUpsert = true }, token);
+            if (alreadyJoined) return Room(room);
             room.Members.Add(userId);
-            await store.Seats.InsertOneAsync(s, new OnlineSeat { UserId = userId, Kind = "Room", ReferenceId = room.Id }, cancellationToken: token);
             await store.Rooms.ReplaceOneAsync(s, r => r.Id == room.Id, room, cancellationToken: token);
             await Emit(s, "RoomUpdated", Room(room), room.Members, token); return Room(room);
         }, ct);

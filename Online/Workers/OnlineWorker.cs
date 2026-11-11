@@ -14,6 +14,7 @@ public sealed class OnlineWorker(OnlineStore store, OnlineService service, Onlin
         using var runtime = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         var ct = runtime.Token;
         Task heartbeat = Task.CompletedTask;
+        Task publisher = Task.CompletedTask;
         try
         {
             await WaitForLease(ct);
@@ -22,6 +23,7 @@ public sealed class OnlineWorker(OnlineStore store, OnlineService service, Onlin
             ct.ThrowIfCancellationRequested();
             lease.MarkReady();
             logger.LogInformation("Online runtime ready; lease acquired and match recovery completed.");
+            publisher = PublishLoop(ct);
 
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
             while (!ct.IsCancellationRequested)
@@ -30,7 +32,6 @@ public sealed class OnlineWorker(OnlineStore store, OnlineService service, Onlin
                 {
                     lease.RequireOwner();
                     await service.Sweep(live, ct);
-                    await Publish(ct);
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
                 catch (OnlineException) when (!lease.HasLease)
@@ -53,7 +54,7 @@ public sealed class OnlineWorker(OnlineStore store, OnlineService service, Onlin
         {
             lease.MarkUnavailable();
             runtime.Cancel();
-            await heartbeat;
+            await Task.WhenAll(heartbeat, publisher);
         }
     }
     private async Task WaitForLease(CancellationToken ct)
@@ -101,7 +102,27 @@ public sealed class OnlineWorker(OnlineStore store, OnlineService service, Onlin
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
     }
-    private async Task Publish(CancellationToken ct)
+    private async Task PublishLoop(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                lease.RequireOwner();
+                // Publishing runs independently of match sweeps: a large set
+                // of clocks/setup checks cannot delay MatchFound or room events.
+                while (await Publish(ct) == 100) ct.ThrowIfCancellationRequested();
+                await store.WaitForCommit(ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Online event delivery failed; the durable outbox will be retried.");
+                try { await Task.Delay(1000, ct); } catch (OperationCanceledException) { break; }
+            }
+        }
+    }
+    private async Task<int> Publish(CancellationToken ct)
     {
         var events = await store.Events.Find(e => !e.Published).SortBy(e => e.CreatedAt).ThenBy(e => e.Sequence).Limit(100).ToListAsync(ct);
         foreach (var e in events)
@@ -116,6 +137,7 @@ public sealed class OnlineWorker(OnlineStore store, OnlineService service, Onlin
             }
             await store.Events.UpdateOneAsync(x => x.Id == e.Id, Builders<OnlineEvent>.Update.Set(x => x.Published, true), cancellationToken: ct);
         }
+        return events.Count;
     }
     public override async Task StopAsync(CancellationToken ct)
     {

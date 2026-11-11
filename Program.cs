@@ -38,7 +38,7 @@ builder.Services.AddOptions<OnlineOptions>()
         o.InitialRatingRange >= 0 && o.RatingRangePerSecond >= 0 && o.MaximumRatingRange >= o.InitialRatingRange &&
         o.CandidatesPerPool is >= 4 and <= 128 && o.CandidatesPerPool % 2 == 0 && o.PoolsPerSweep is >= 1 and <= 8 &&
         o.MaximumPairsPerSweep is >= 1 and <= 16 && o.RecentOpponentSeconds >= 0 && o.RecentOpponentRelaxSeconds >= 0 &&
-        o.MaximumLatencyDifferenceMilliseconds > 0,
+        o.MaximumLatencyDifferenceMilliseconds > 0 && o.SmallPoolRelaxSeconds >= 0,
         "Online deadlines, protocol and rating configuration are invalid.")
     .ValidateOnStart();
 builder.Services.AddSingleton<OnlineRuntimeLease>();
