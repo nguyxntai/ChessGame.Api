@@ -43,6 +43,15 @@ public sealed class GameRules(ChaosEngine chaos)
     }
     public static string Other(string team) => team == "White" ? "Black" : "White";
 
+    public static string? CheckedTeam(OnlineMatch match)
+    {
+        if (match.Status != "InProgress") return null;
+        bool check = match.Chaos is null ? ClassicRules.IsInCheck(Read(match).Board, Enum.Parse<Team>(match.Turn)) :
+            match.Chaos.RulesVersion == 3 ? Chaos35Engine.InCheck(match, match.Turn) :
+            new LegacyChaosEngine().InCheck(match, match.Turn);
+        return check ? match.Turn : null;
+    }
+
     public void ApplyMove(OnlineMatch match, string team, MoveCommand command)
     {
         if (team != match.Turn) throw new OnlineException("NotYourTurn");

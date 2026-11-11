@@ -15,7 +15,7 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ch
 {
     private readonly OnlineOptions config = options.Value;
     private static bool Active(OnlineMatch m) => m.Status is "AwaitingReady" or "InProgress";
-    private static TicketSnapshot Ticket(OnlineTicket t) => new(t.Id, t.Status, t.Settings, t.CreatedAt, t.ExpiresAt, t.MatchId);
+    private static TicketSnapshot Ticket(OnlineTicket t) => new(t.Id, t.Status, t.Settings, t.CreatedAt, t.ExpiresAt, t.MatchId, t.Rated);
     private static RoomSnapshot Room(OnlineRoom r) => new(r.Id, r.Code, r.OwnerId, r.Members, r.Settings, r.Status, r.MatchId, r.ExpiresAt);
     private static PlayerSnapshot Player(MatchPlayer p) => new(p.UserId, p.Username, p.DisplayName, p.Color, p.Rating,
         p.Ready, p.Connected, p.ReconnectDeadline, p.Loadout, p.Accepted, p.AvatarId, p.Rank);
@@ -41,7 +41,7 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ch
             m.Chaos is null ? fen : null, fen.Split(' ')[2], m.EnPassantTarget, m.HalfMoveClock, m.FullMoveNumber,
             new(Math.Max(0, white), Math.Max(0, black), m.ClockStartedAt is not null && m.Status == "InProgress" ? m.Turn : null, now),
             m.Players.Select(Player).ToList(), m.ReadyDeadline, m.DrawOffer, custom, m.Result, m.RematchId, m.Rated, m.AcceptDeadline,
-            m.CaptureHistoryVersion == 1 ? m.Captures.ToList() : null);
+            m.CaptureHistoryVersion == 1 ? m.Captures.ToList() : null, GameRules.CheckedTeam(m));
     }
     private GameSettings ValidateSettings(GameSettings settings)
     {
@@ -68,10 +68,32 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ch
         if (!m.Players.Any(p => p.UserId == userId)) throw new OnlineException("Forbidden", 403);
         return m;
     }
-    private async Task AvailableAsync(IClientSessionHandle s, string userId, CancellationToken ct)
+    private async Task AvailableAsync(IClientSessionHandle s, string userId, CancellationToken ct, string? joiningRoomId = null)
     {
         var seat = await store.Seats.Find(s, x => x.UserId == userId).FirstOrDefaultAsync(ct);
-        if (seat is not null) throw new OnlineException(seat.Kind switch { "Ticket" => "AlreadyQueued", "Room" => "AlreadyInRoom", _ => "AlreadyInMatch" });
+        if (seat is null || seat.Kind == "Room" && seat.ReferenceId == joiningRoomId) return;
+        // A previous disconnect/release must not strand a reservation forever.
+        // Only release a seat after verifying its durable owner is terminal.
+        bool stale = false;
+        if (seat.Kind == "Ticket")
+        {
+            var ticket = await store.Tickets.Find(s, t => t.Id == seat.ReferenceId).FirstOrDefaultAsync(ct);
+            if (ticket is not null) await ExpireTicket(s, ticket, DateTime.UtcNow, ct);
+            stale = ticket is null || ticket.Status is "Expired" or "Cancelled";
+        }
+        else if (seat.Kind == "Room")
+        {
+            var room = await store.Rooms.Find(s, r => r.Id == seat.ReferenceId).FirstOrDefaultAsync(ct);
+            if (room?.Status == "Open" && room.ExpiresAt <= DateTime.UtcNow) await CloseRoom(s, room, "RoomExpired", ct);
+            stale = room is null || room.Status == "Closed" || room.Status == "Open" && !room.Members.Contains(userId);
+        }
+        else if (seat.Kind == "Match")
+        {
+            var match = await store.Matches.Find(s, m => m.Id == seat.ReferenceId).FirstOrDefaultAsync(ct);
+            stale = match is null || !Active(match);
+        }
+        if (!stale) throw new OnlineException(seat.Kind switch { "Ticket" => "AlreadyQueued", "Room" => "AlreadyInRoom", _ => "AlreadyInMatch" });
+        await store.Seats.DeleteOneAsync(s, x => x.UserId == userId && x.Kind == seat.Kind && x.ReferenceId == seat.ReferenceId, cancellationToken: ct);
     }
     private async Task Emit(IClientSessionHandle s, string type, object payload, List<string> recipients, CancellationToken ct,
         OnlineMatch? match = null)
@@ -176,15 +198,16 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ch
         }
         return result;
     }
-    private async Task<OnlineMatch> CreateMatch(IClientSessionHandle s, List<string> ids, GameSettings settings, bool rated, DateTime now, CancellationToken ct, MatchmakingDiagnostics? quality = null)
+    private async Task<OnlineMatch> CreateMatch(IClientSessionHandle s, List<string> ids, GameSettings settings, bool rated, DateTime now, CancellationToken ct, MatchmakingDiagnostics? quality = null, bool? requiresAcceptance = null)
     {
         if (ids.Count != 2 || ids.Distinct().Count() != 2) throw new OnlineException("InvalidParticipants");
         var first = await UserAsync(s, ids[0], ct); var second = await UserAsync(s, ids[1], ct);
         var ordered = MatchmakingPolicy.FirstIsWhite(first.OnlineColors.For(settings.Mode), second.OnlineColors.For(settings.Mode),
             () => RandomNumberGenerator.GetInt32(2) == 0) ? ids : ids.AsEnumerable().Reverse().ToList();
+        bool acceptance = requiresAcceptance ?? rated;
         var m = new OnlineMatch { CaptureHistoryVersion = 1, Settings = settings, Rated = rated, Matchmaking = quality, CreatedAt = now,
-            AcceptDeadline = rated ? now.AddSeconds(config.AcceptSeconds) : null,
-            ReadyDeadline = now.AddSeconds(config.ReadySeconds + (rated ? config.AcceptSeconds : 0)),
+            AcceptDeadline = acceptance ? now.AddSeconds(config.AcceptSeconds) : null,
+            ReadyDeadline = now.AddSeconds(config.ReadySeconds + (acceptance ? config.AcceptSeconds : 0)),
             WhiteMilliseconds = settings.InitialSeconds * 1000.0, BlackMilliseconds = settings.InitialSeconds * 1000.0 };
         foreach (var id in ordered)
         {
@@ -192,7 +215,7 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ch
             bool connected = await store.Connections.Find(s, x => x.UserId == id && x.ExpiresAt > now).AnyAsync(ct);
             m.Players.Add(new MatchPlayer { UserId = id, Username = user.Username, DisplayName = user.Profile.DisplayName,
                 AvatarId = user.Profile.AvatarId, Rank = ranks.Profile(settings.Mode, user.Ratings.For(settings.Mode)),
-                Color = m.Players.Count == 0 ? "White" : "Black", Rating = RatingPolicies.Display(user.Ratings.For(settings.Mode).Rating), Connected = connected, Accepted = !rated, Loadout = await Loadout(s, user, ct) });
+                Color = m.Players.Count == 0 ? "White" : "Black", Rating = RatingPolicies.Display(user.Ratings.For(settings.Mode).Rating), Connected = connected, Accepted = !acceptance, Loadout = await Loadout(s, user, ct) });
             await store.Seats.ReplaceOneAsync(s, x => x.UserId == id, new OnlineSeat { UserId = id, Kind = "Match", ReferenceId = m.Id },
                 new ReplaceOptions { IsUpsert = true }, ct);
         }

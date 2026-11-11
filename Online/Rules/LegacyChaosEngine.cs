@@ -152,9 +152,9 @@ internal sealed class LegacyChaosEngine
                 e?.Bloodthirsty == true, e?.CannonUntil > side.CompletedTurns, e?.Decoy == true);
         }
     }
-    private bool InCheck(OnlineMatch m, string team)
+    internal bool InCheck(OnlineMatch m, string team)
     {
-        var king = m.Board.FirstOrDefault(p => p.Team == team && p.Kind == "King" && !Effect(m, p).Decoy);
+        var king = m.Board.FirstOrDefault(p => p.Team == team && p.Kind == "King" && !Side(m, team).Effects.Any(e => e.PieceId == p.Id && e.Decoy));
         return king is null || KingSafetyRules.IsAttacked(GameRules.Read(m).Board, GameRules.Square(king.Square),
             Enum.Parse<Team>(GameRules.Other(team)), new Context(m));
     }

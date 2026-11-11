@@ -23,6 +23,8 @@ public sealed class OnlineStore
     private readonly IMongoCollection<BsonDocument> coordinator;
     private readonly IMongoClient client;
     private readonly OnlineRuntimeLease runtimeLease;
+    private readonly SemaphoreSlim committed = new(0, 1);
+    public Task<bool> WaitForCommit(CancellationToken ct) => committed.WaitAsync(TimeSpan.FromSeconds(1), ct);
 
     public OnlineStore(IMongoDatabase db, IMongoClient client, OnlineRuntimeLease runtimeLease)
     {
@@ -46,7 +48,7 @@ public sealed class OnlineStore
     public async Task<T> Transaction<T>(Func<IClientSessionHandle, CancellationToken, Task<T>> action, CancellationToken ct = default)
     {
         using var session = await client.StartSessionAsync(cancellationToken: ct);
-        return await session.WithTransactionAsync(async (s, token) =>
+        var result = await session.WithTransactionAsync(async (s, token) =>
         {
             // Every online mutation first writes the same durable guard. MongoDB retries write conflicts;
             // reads after the guard share the transaction snapshot, including pairing/cancel/start races.
@@ -60,6 +62,10 @@ public sealed class OnlineStore
                 throw new OnlineException("OnlineTemporarilyUnavailable", 503);
             return await action(s, token);
         }, new TransactionOptions(readConcern: ReadConcern.Snapshot, writeConcern: WriteConcern.WMajority), ct);
+        // Wake the outbox only after commit, so a fast publisher cannot miss
+        // uncommitted events. Coalesce bursts into one wakeup.
+        try { committed.Release(); } catch (SemaphoreFullException) { }
+        return result;
     }
     public async Task EnsureIndexesAsync()
     {

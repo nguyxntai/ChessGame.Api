@@ -142,7 +142,7 @@ Không nhận userId, MMR, màu, clock, kết quả hay phần thưởng do clie
 
 | Endpoint | Mục đích |
 | --- | --- |
-| POST `/api/matchmaking/tickets` | Tạo queue; body gồm `requestId`, `settings` |
+| POST `/api/matchmaking/tickets` | Tạo queue; body gồm `requestId`, `settings`, `rated` (mặc định `false`) |
 | GET `/api/matchmaking/tickets/current` | Ticket gần nhất, kể cả terminal; không có thì `null` |
 | DELETE `/api/matchmaking/tickets/{ticketId}` | Cancel hoặc trả trạng thái đã matched |
 | GET `/api/matches/current` | Trận chưa hoàn tất hoặc `null` |
@@ -375,7 +375,10 @@ Matchmaking dùng policy riêng `classic-elo-v1` hoặc `chaos-glicko2-v1`; phò
 **Chỉ trận matchmaking rated nhận thưởng wallet.** Phòng riêng và mọi trận tái đấu đều
 `Rated=false`: Golds/Diamonds/Tickets trong result bằng 0, không cộng wallet hoặc ghi ledger thưởng,
 kể cả chơi đủ thời gian/số nước. Kết quả vẫn lưu; thống kê thắng/hòa/thua chỉ cộng nếu cả hai đã có Move hợp lệ.
-Backend tự đặt Rated. Rating cần nước hợp lệ của cả hai và vượt điều kiện chống farm/review.
+Queue normal gửi `rated=false`; ranked gửi `rated=true`. Backend ghép hai người cùng lựa chọn
+trong pool riêng (`Normal:` / `Ranked:`) và lưu lựa chọn vào match; không nhận cờ rated từ lệnh
+đánh quân hay hoàn tất trận. Phòng riêng/rematch luôn unrated. Client cũ không gửi cờ được xem là normal.
+Rating cần nước hợp lệ của cả hai và vượt điều kiện chống farm/review.
 Wallet cần thêm ≥5 Move mỗi bên và ≥60 giây; bỏ trận không nhận wallet.
 Mức thưởng cho trận đủ điều kiện dùng `MatchRewardPolicy.CalculateNetworkReward` hiện có của Unity:
 

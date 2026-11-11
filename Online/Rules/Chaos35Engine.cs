@@ -176,7 +176,7 @@ internal sealed partial class Chaos35Engine
             e.CannonUntil > m.Chaos!.CombinedPlies, e.Decoy, s.FreestyleKnight == p.Id, e.QueenMastery, e.TrapPawn,
             s.OriginalQueen == p.Id && Has(s, 4) && !s.BomberUsed);
     }
-    private static bool InCheck(OnlineMatch m, string team)
+    internal static bool InCheck(OnlineMatch m, string team)
     {
         if (Has(Side(m, team), 32)) return false;
         var king = RealKing(m, team); if (king is null) return true;
