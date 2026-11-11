@@ -60,6 +60,51 @@ public sealed class MailboxIntegrationTests : IAsyncLifetime
     }
     private Task<User> Reload(ObjectId id) => db.GetCollection<User>("users").Find(u => u.Id == id).SingleAsync();
 
+    [MongoMailboxFact] public async Task ClaimAllCrossesPagesSkipsExpiredAndIsSafeAgainstConcurrentClaims()
+    {
+        var user = await User(); var other = await User();
+        var collection = db.GetCollection<MailboxMessage>("mailbox_messages");
+        var messages = Enumerable.Range(0, 65).Select(i => new MailboxMessage {
+            MailId = "reward-" + i, UserId = user.Id, SentAtUtc = DateTime.UtcNow,
+            Attachments = new() { new() { Currency = "GOLDS", Amount = 7 }, new() { Currency = "TICKETS", Amount = 1 } }
+        }).ToList();
+        await collection.InsertManyAsync(messages);
+        await collection.InsertManyAsync(new[] {
+            new MailboxMessage { MailId = "expired", UserId = user.Id, ExpiresAtUtc = DateTime.UtcNow.AddMinutes(-1), Attachments = new() { new() { Currency = "GOLDS", Amount = 900 } } },
+            new MailboxMessage { MailId = "letter", UserId = user.Id },
+            new MailboxMessage { MailId = "foreign", UserId = other.Id, Attachments = new() { new() { Currency = "GOLDS", Amount = 900 } } }
+        });
+        var bulk = Enumerable.Range(0, 4).Select(_ => NewService().ClaimAllAsync(user.Id)).ToArray();
+        var single = NewService().ClaimAsync(user.Id, messages[0].MailId);
+        var results = await Task.WhenAll(bulk); await single;
+        Assert.InRange(results.Sum(r => r.ClaimedCount), 64, 65);
+        Assert.Equal(1455, (await Reload(user.Id)).Wallet.Golds);
+        Assert.Equal(75, (await Reload(user.Id)).Wallet.Tickets);
+        Assert.Equal(130, await db.GetCollection<CurrencyTransaction>("currency_transactions").CountDocumentsAsync(t => t.UserId == user.Id));
+        Assert.Equal(65, await collection.CountDocumentsAsync(m => m.UserId == user.Id && m.ReadAtUtc != null && m.ClaimedAtUtc != null));
+        Assert.Null((await collection.Find(m => m.MailId == "foreign").SingleAsync()).ClaimedAtUtc);
+        Assert.Null((await collection.Find(m => m.MailId == "expired").SingleAsync()).ReadAtUtc);
+        var replay = await NewService().ClaimAllAsync(user.Id);
+        Assert.Equal(0, replay.ClaimedCount); Assert.Empty(replay.Rewards);
+    }
+
+    [MongoMailboxFact] public async Task ClaimAllRollsBackEveryLetterOnInvalidRewardOrOverflow()
+    {
+        var user = await User(); var welcome = (await service.EnrollAsync(user.Id)).Mail!;
+        var collection = db.GetCollection<MailboxMessage>("mailbox_messages");
+        await collection.InsertOneAsync(new MailboxMessage { MailId = "bad", UserId = user.Id,
+            Attachments = new() { new() { Currency = "GOLDS", Amount = -3 } } });
+        Assert.Equal("INVALID_REWARDS", (await Assert.ThrowsAsync<MailboxException>(() => service.ClaimAllAsync(user.Id))).Code);
+        Assert.Equal(1000, (await Reload(user.Id)).Wallet.Golds);
+        Assert.Null((await service.GetAsync(user.Id, welcome.MailId)).ClaimedAtUtc);
+        await collection.DeleteOneAsync(m => m.MailId == "bad");
+        await db.GetCollection<User>("users").UpdateOneAsync(u => u.Id == user.Id, Builders<User>.Update.Set(u => u.Wallet.Golds, long.MaxValue));
+        await Assert.ThrowsAsync<OverflowException>(() => service.ClaimAllAsync(user.Id));
+        Assert.Null((await service.GetAsync(user.Id, welcome.MailId)).ClaimedAtUtc);
+        var disabled = await User(false);
+        Assert.Equal("ACCOUNT_DISABLED", (await Assert.ThrowsAsync<MailboxException>(() => service.ClaimAllAsync(disabled.Id))).Code);
+    }
+
     [MongoMailboxFact] public async Task ConcurrentEnrollmentAndClaimsGrantExactlyOnceAndSurviveServiceRecreation()
     {
         var user = await User();

@@ -41,7 +41,8 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ch
             m.Chaos is null ? fen : null, fen.Split(' ')[2], m.EnPassantTarget, m.HalfMoveClock, m.FullMoveNumber,
             new(Math.Max(0, white), Math.Max(0, black), m.ClockStartedAt is not null && m.Status == "InProgress" ? m.Turn : null, now),
             m.Players.Select(Player).ToList(), m.ReadyDeadline, m.DrawOffer, custom, m.Result, m.RematchId, m.Rated, m.AcceptDeadline,
-            m.CaptureHistoryVersion == 1 ? m.Captures.ToList() : null, GameRules.CheckedTeam(m));
+            m.CaptureHistoryVersion == 1 ? m.Captures.ToList() : null, GameRules.CheckedTeam(m),
+            m.SharedBoardAssetKey ?? BoardChoice(m.Players.FirstOrDefault(p => p.Color == "White")));
     }
     private GameSettings ValidateSettings(GameSettings settings)
     {
@@ -190,6 +191,8 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ch
         var result = new List<LoadoutSnapshot>();
         foreach (var entry in ChessGame.Api.Services.CosmeticLoadoutPolicy.References(user.Equipped))
         {
+            // Multiplayer always uses the shared galaxy backdrop; local background equipment is independent.
+            if (entry.Slot == "BACKGROUND") continue;
             var item = await store.Items.Find(s, x => x.Id == entry.Id && x.IsActive).FirstOrDefaultAsync(ct);
             if (item is null || !ChessGame.Api.Services.CosmeticLoadoutPolicy.Fits(item.Type, entry.Slot) ||
                 !await store.PlayerItems.Find(s, x => x.UserId == user.Id && x.ItemId == entry.Id).AnyAsync(ct))
@@ -202,8 +205,7 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ch
     {
         if (ids.Count != 2 || ids.Distinct().Count() != 2) throw new OnlineException("InvalidParticipants");
         var first = await UserAsync(s, ids[0], ct); var second = await UserAsync(s, ids[1], ct);
-        var ordered = MatchmakingPolicy.FirstIsWhite(first.OnlineColors.For(settings.Mode), second.OnlineColors.For(settings.Mode),
-            () => RandomNumberGenerator.GetInt32(2) == 0) ? ids : ids.AsEnumerable().Reverse().ToList();
+        var ordered = RandomNumberGenerator.GetInt32(2) == 0 ? ids : ids.AsEnumerable().Reverse().ToList();
         bool acceptance = requiresAcceptance ?? rated;
         var m = new OnlineMatch { CaptureHistoryVersion = 1, Settings = settings, Rated = rated, Matchmaking = quality, CreatedAt = now,
             AcceptDeadline = acceptance ? now.AddSeconds(config.AcceptSeconds) : null,
@@ -219,6 +221,8 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ch
             await store.Seats.ReplaceOneAsync(s, x => x.UserId == id, new OnlineSeat { UserId = id, Kind = "Match", ReferenceId = m.Id },
                 new ReplaceOptions { IsUpsert = true }, ct);
         }
+        // Freeze the coin toss before either client begins loading; reconnects never reroll it.
+        m.SharedBoardAssetKey = BoardChoice(m.Players[RandomNumberGenerator.GetInt32(2)]);
         GameRules.Write(m, FenCodec.Parse(FenCodec.InitialPosition));
         if (settings.Mode == "Chaos") chaos.Initialize(m, now);
         else GameRules.RecordPosition(m);
@@ -243,10 +247,20 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ch
         }
         if (ReadyExpired(m, now)) { await Cancel(s, m, "ReadyTimeout", now, ct); return; }
         if (!m.Players.All(p => p.Ready && p.Connected) || !chaos.SetupDone(m)) return;
-        // Revalidate against current inventory and then freeze this loadout for the lifetime of the match.
+        // Validate the frozen selection rather than replacing it after clients have loaded the match.
         try
         {
-            foreach (var p in m.Players) p.Loadout = await Loadout(s, await UserAsync(s, p.UserId, ct), ct);
+            foreach (var p in m.Players)
+            {
+                var user = await UserAsync(s, p.UserId, ct);
+                foreach (var entry in p.Loadout.Where(l => l.Type != ChessGame.Api.Services.CosmeticLoadoutPolicy.BackgroundType))
+                {
+                    if (!ObjectId.TryParse(entry.ItemId, out var itemId) ||
+                        !await store.Items.Find(s, i => i.Id == itemId && i.IsActive && i.UnityAssetKey == entry.UnityAssetKey && i.Type == entry.Type).AnyAsync(ct) ||
+                        !await store.PlayerItems.Find(s, i => i.UserId == user.Id && i.ItemId == itemId).AnyAsync(ct))
+                        throw new OnlineException("InvalidLoadout");
+                }
+            }
         }
         catch (OnlineException ex) when (ex.Code is "InvalidLoadout" or "Forbidden")
         { await Cancel(s, m, ex.Code, now, ct); return; }
@@ -256,6 +270,8 @@ public sealed partial class OnlineService(OnlineStore store, GameRules rules, Ch
         await MatchEvent(s, m, "MatchStarted", now, ct);
         if (initialOutcome is { } outcome) await Finish(s, m, outcome.WinnerTeam, outcome.Reason, now, ct);
     }
+    private static string BoardChoice(MatchPlayer? player) => player?.Loadout
+        .FirstOrDefault(l => l.Type == ChessGame.Api.Services.CosmeticLoadoutPolicy.BoardType)?.UnityAssetKey ?? "tazji_lowpoly";
     private async Task Cancel(IClientSessionHandle s, OnlineMatch m, string reason, DateTime now, CancellationToken ct)
     {
         if (!Active(m)) return;

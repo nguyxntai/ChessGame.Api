@@ -14,6 +14,17 @@ namespace ChessGame.Api.Tests;
 
 public sealed class MultiplayerRegressionTests
 {
+    [Fact] public void SharedBoardSurvivesSerializationAndIsIdenticalForBothViewers()
+    {
+        var match = new OnlineMatch { SharedBoardAssetKey = "kingdom_rush_veznan", Players = new() {
+            new() { UserId = "a", Color = "White" }, new() { UserId = "b", Color = "Black" } } };
+        GameRules.Write(match, FenCodec.Parse(FenCodec.InitialPosition));
+        var restored = BsonSerializer.Deserialize<OnlineMatch>(match.ToBson());
+        Assert.Equal("kingdom_rush_veznan", OnlineService.Snapshot(restored, DateTime.UtcNow, "a").SharedBoardAssetKey);
+        Assert.Equal("kingdom_rush_veznan", OnlineService.Snapshot(restored, DateTime.UtcNow, "b").SharedBoardAssetKey);
+        Assert.Equal(6, ChessGame.Api.Services.Shop.KingdomRushCatalog.Definitions().Count(i => i.IsActive));
+        Assert.DoesNotContain(ChessGame.Api.Services.Shop.KingdomRushCatalog.Definitions(), i => i.Code == "BACKGROUND_KINGDOM_RUSH" && i.IsActive);
+    }
     [Theory]
     [InlineData(11000, 409, "LobbyReservationConflict")]
     [InlineData(112, 503, "OnlineTemporarilyUnavailable")]

@@ -96,8 +96,7 @@ public sealed class MailboxService
             if (message.ClaimedAtUtc.HasValue) return Receipt(message);
             if (message.ExpiresAtUtc <= DateTime.UtcNow) throw new MailboxException("MAIL_EXPIRED");
             if (message.Attachments.Count == 0) throw new MailboxException("NO_REWARDS");
-            if (message.Attachments.Any(a => a.Amount <= 0 || a.Amount > 1_000_000 || a.Currency is not ("GOLDS" or "DIAMONDS" or "TICKETS")) ||
-                message.Attachments.GroupBy(a => a.Currency).Any(g => g.Count() > 1)) throw new MailboxException("INVALID_REWARDS");
+            ValidateRewards(message);
             long Amount(string currency) => message.Attachments.Where(a => a.Currency == currency).Sum(a => a.Amount);
             // Reject overflow before Mongo's numeric increment can promote/corrupt wallet values.
             checked { _ = user.Wallet.Golds + Amount("GOLDS"); _ = user.Wallet.Diamonds + Amount("DIAMONDS"); _ = user.Wallet.Tickets + Amount("TICKETS"); }
@@ -107,13 +106,58 @@ public sealed class MailboxService
                 Builders<User>.Update.Inc(u => u.Wallet.Golds, Amount("GOLDS")).Inc(u => u.Wallet.Diamonds, Amount("DIAMONDS"))
                     .Inc(u => u.Wallet.Tickets, Amount("TICKETS")).Set(u => u.UpdatedAt, now),
                 new FindOneAndUpdateOptions<User> { ReturnDocument = ReturnDocument.After }, token) ?? throw new MailboxException("ACCOUNT_DISABLED");
-            message.ClaimedAtUtc = now; message.WalletAfter = after.Wallet;
+            message.ClaimedAtUtc = now; message.ReadAtUtc ??= now; message.WalletAfter = after.Wallet;
             await mail.ReplaceOneAsync(s, m => m.UserId == id && m.MailId == mailId, message, cancellationToken: token);
             await ledger.InsertManyAsync(s, message.Attachments.Select((a, index) => new CurrencyTransaction {
                 UserId = id, Currency = a.Currency, Amount = a.Amount, Source = "MAILBOX", RequestId = "mail:" + mailId, EntryIndex = index,
                 BalanceAfter = a.Currency == "GOLDS" ? after.Wallet.Golds : a.Currency == "DIAMONDS" ? after.Wallet.Diamonds : after.Wallet.Tickets, CreatedAt = now }), cancellationToken: token);
             return Receipt(message);
         }, new TransactionOptions(readConcern: ReadConcern.Snapshot, writeConcern: WriteConcern.WMajority), ct);
+    }
+    public async Task<MailClaimAllReceipt> ClaimAllAsync(ObjectId id, CancellationToken ct = default)
+    {
+        using var session = await client.StartSessionAsync(cancellationToken: ct);
+        return await session.WithTransactionAsync(async (s, token) =>
+        {
+            var user = await users.Find(s, u => u.Id == id).FirstOrDefaultAsync(token);
+            if (user == null) throw new MailboxException("USER_NOT_FOUND");
+            if (!user.IsActive) throw new MailboxException("ACCOUNT_DISABLED");
+            var now = DateTime.UnixEpoch.AddMilliseconds(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            var f = Builders<MailboxMessage>.Filter;
+            var pending = await mail.Find(s, f.Eq(m => m.UserId, id) & f.Eq(m => m.ClaimedAtUtc, null) &
+                (f.Eq(m => m.ExpiresAtUtc, null) | f.Gt(m => m.ExpiresAtUtc, now)) & f.SizeGt(m => m.Attachments, 0))
+                .SortBy(m => m.SentAtUtc).ThenBy(m => m.MailId).ToListAsync(token);
+            if (pending.Count == 0) return new MailClaimAllReceipt(0, new(), user.Wallet);
+            foreach (var message in pending) ValidateRewards(message);
+            var rewards = pending.SelectMany(m => m.Attachments).GroupBy(a => a.Currency)
+                .Select(g => new MailAttachment { Currency = g.Key, Amount = g.Sum(a => a.Amount) }).ToList();
+            long Amount(string currency) => rewards.Where(a => a.Currency == currency).Sum(a => a.Amount);
+            checked { _ = user.Wallet.Golds + Amount("GOLDS"); _ = user.Wallet.Diamonds + Amount("DIAMONDS"); _ = user.Wallet.Tickets + Amount("TICKETS"); }
+            var after = await users.FindOneAndUpdateAsync(s, Builders<User>.Filter.Eq(u => u.Id, id) & Builders<User>.Filter.Eq(u => u.IsActive, true),
+                Builders<User>.Update.Inc(u => u.Wallet.Golds, Amount("GOLDS")).Inc(u => u.Wallet.Diamonds, Amount("DIAMONDS"))
+                    .Inc(u => u.Wallet.Tickets, Amount("TICKETS")).Set(u => u.UpdatedAt, now),
+                new FindOneAndUpdateOptions<User> { ReturnDocument = ReturnDocument.After }, token) ?? throw new MailboxException("ACCOUNT_DISABLED");
+            // One transaction covers every page, wallet, read state and per-mail unique ledger entries.
+            // A concurrent single/bulk claim conflicts and is retried from a fresh snapshot by MongoDB.
+            var changes = new List<WriteModel<MailboxMessage>>();
+            var entries = new List<CurrencyTransaction>();
+            foreach (var message in pending)
+            {
+                message.ClaimedAtUtc = now; message.ReadAtUtc ??= now; message.WalletAfter = after.Wallet;
+                changes.Add(new ReplaceOneModel<MailboxMessage>(f.Eq(m => m.UserId, id) & f.Eq(m => m.MailId, message.MailId), message));
+                entries.AddRange(message.Attachments.Select((a, index) => new CurrencyTransaction {
+                    UserId = id, Currency = a.Currency, Amount = a.Amount, Source = "MAILBOX", RequestId = "mail:" + message.MailId, EntryIndex = index,
+                    BalanceAfter = a.Currency == "GOLDS" ? after.Wallet.Golds : a.Currency == "DIAMONDS" ? after.Wallet.Diamonds : after.Wallet.Tickets, CreatedAt = now }));
+            }
+            await mail.BulkWriteAsync(s, changes, cancellationToken: token);
+            await ledger.InsertManyAsync(s, entries, cancellationToken: token);
+            return new MailClaimAllReceipt(pending.Count, rewards, after.Wallet);
+        }, new TransactionOptions(readConcern: ReadConcern.Snapshot, writeConcern: WriteConcern.WMajority), ct);
+    }
+    private static void ValidateRewards(MailboxMessage message)
+    {
+        if (message.Attachments.Any(a => a.Amount <= 0 || a.Amount > 1_000_000 || a.Currency is not ("GOLDS" or "DIAMONDS" or "TICKETS")) ||
+            message.Attachments.GroupBy(a => a.Currency).Any(g => g.Count() > 1)) throw new MailboxException("INVALID_REWARDS");
     }
     private static MailClaimReceipt Receipt(MailboxMessage m) => new("mail:" + m.MailId, m.MailId,
         m.ClaimedAtUtc ?? throw new MailboxException("CLAIM_RECEIPT_INVALID"), m.WalletAfter ?? throw new MailboxException("CLAIM_RECEIPT_INVALID"));
